@@ -1,0 +1,40 @@
+1. Создание пользователей БД
+
+	CREATE USER 'editor'@'localhost' IDENTIFIED BY '5ohnn0';
+	CREATE USER 'reader'@'localhost' IDENTIFIED BY 'passwd44';
+
+	GRANT ALL PRIVILEGES ON sc_history_db.* TO 'editor'@'localhost';
+	GRANT ALL PRIVILEGES ON sc_clan_db.* TO 'editor'@'localhost';
+	GRANT ALL PRIVILEGES ON other_db.* TO 'editor'@'localhost';
+
+	GRANT SELECT ON sc_history_db.* TO 'reader'@'localhost';
+	GRANT SELECT ON sc_clan_db.* TO 'reader'@'localhost';
+	GRANT SELECT ON other_db.* TO 'reader'@'localhost';
+
+2. Создание таблиц БД
+
+	CREATE DATABASE sc_history_db;
+	CREATE TABLE sc_history_db.nickname_uid (uid BIGINT, nickname VARCHAR(20));
+	CREATE TABLE sc_history_db.lost_uids (uid BIGINT);
+	CREATE TABLE sc_history_db.top100 (uid  BIGINT, nickname VARCHAR(20), kd DOUBLE, kd2 DOUBLE, kda DOUBLE, kda2 DOUBLE, wr DOUBLE, wr2 DOUBLE, wl DOUBLE, wl2 DOUBLE, effRating BIGINT, effRating2 BIGINT, karma BIGINT, karma2 BIGINT, prestigeBonus DOUBLE, prestigeBonus2 DOUBLE, gamePlayed BIGINT, gamePlayed2 BIGINT, gameWin BIGINT, gameWin2 BIGINT, totalAssists BIGINT, totalAssists2 BIGINT, totalBattleTime BIGINT, totalBattleTime2 BIGINT, totalDeath BIGINT, totalDeath2 BIGINT, totalDmgDone BIGINT, totalDmgDone2 BIGINT, totalHealingDone BIGINT, totalHealingDone2 BIGINT, totalKill BIGINT, totalKill2 BIGINT, totalVpDmgDone BIGINT, totalVpDmgDone2 BIGINT, clanName VARCHAR(20), clanTag VARCHAR(10));
+	
+	CREATE DATABASE other_db;
+	CREATE TABLE other_db.timestamps (nomination VARCHAR(20), value BIGINT);
+	CREATE TABLE other_db.translate (input VARCHAR(128), ru VARCHAR(256), en VARCHAR(256)) DEFAULT CHARACTER SET utf8;
+	INSERT INTO other_db.timestamps (nomination, value) VALUES ("RecordStartTime", 0);
+	INSERT INTO other_db.timestamps (nomination, value) VALUES ("RecordEndTime", 0);
+	
+	CREATE DATABASE sc_clan_db;
+	CREATE TABLE sc_clan_db.corporations_history (date DATE, clanName VARCHAR(20), clanTag VARCHAR(10), effRating BIGINT, karma BIGINT, prestigeBonus DOUBLE, gamePlayed BIGINT, gameWin BIGINT, totalAssists BIGINT, totalBattleTime BIGINT, totalDeath BIGINT, totalDmgDone BIGINT, totalHealingDone BIGINT, totalKill BIGINT, totalVpDmgDone BIGINT, number INT);
+	
+3. Копирование исполняемх файлов
+
+4. Прописваение автозагрузки
+
+5. Установка дополнительнх компонентов
+
+	apt-get install libmysqlclient-dev
+	pip3 install mysqlclient
+	
+	
+	
