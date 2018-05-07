@@ -1,0 +1,141 @@
+@font-face {
+	font-family: "Anonymous Pro";
+	src: url("includes/fonts/Anonymous Pro.ttf");
+}
+
+html {
+	background-image: url(/includes/seamless-background-wall.png);
+	background-repeat: repeat;
+	font-family: "Anonymous Pro";
+	font-size: large;
+}
+
+s0 {
+	font-size: small;
+}
+s1 {
+	font-size: medium;
+}
+s2 {
+	font-size: large;
+}
+s3 {
+	font-size: x-large;
+}
+
+textarea {
+	font-family: monospace;
+	font-size: large;
+	background: rgba(244, 244, 244, 0.98);
+}
+
+small {
+	margin: 0px;
+	font-size: small;
+	display: block;
+}
+
+table {
+	/*white-space: pre;*/
+	background-color: rgba(166, 255, 112, 0.88);
+}
+
+th, td {
+	padding-left: 5px;
+	padding-right: 5px;
+}
+
+tr:hover {
+	background-color: #e8e8e8;
+}
+
+details {
+	border: groove;
+	padding: 3px;
+}
+
+footer {
+	left: 0;
+	right: 0;
+	bottom: 0;
+	padding: 5px;
+	background: #dadada;
+	position: fixed;
+	border-top: 2px groove rgba(97, 255, 0, 0.84);
+}
+
+.button {
+	margin: 2px;
+	text-decoration:none;
+	text-align:center;
+	padding:1px 10px;
+	border:solid 1px #004F72;
+	
+	font-family: monospace;
+	font-size: large;
+	font-weight:bold;
+	color:#000000;
+	background:#adfb7d;
+	-webkit-box-shadow:0px 0px 2px #bababa, inset 0px 0px 1px #ffffff;
+	-moz-box-shadow: 0px 0px 2px #bababa,  inset 0px 0px 1px #ffffff;
+	box-shadow:0px 0px 2px #bababa, inset 0px 0px 1px #ffffff;
+}
+
+.button_off {
+	margin: 2px;
+	text-decoration:none;
+	text-align:center;
+	padding:1px 10px;
+	border:solid 1px #004F72;
+	
+	font-family: monospace;
+	font-size: large;
+	font-weight:bold;
+	color:#000000;
+	background:#b7b7b7;
+	-webkit-box-shadow:0px 0px 2px #bababa, inset 0px 0px 1px #ffffff;
+	-moz-box-shadow: 0px 0px 2px #bababa,  inset 0px 0px 1px #ffffff;
+	box-shadow:0px 0px 2px #bababa, inset 0px 0px 1px #ffffff;
+}
+
+#left {
+	float: left;
+	width: 54%;
+	min-width: 350px;
+}
+
+#right {
+	min-width: 250px;
+	margin-left: 55%;
+}
+
+#bottom {
+	clear: both;
+}
+
+.poster {
+	display: inline-block;
+	padding-left: 5px;
+	padding-right: 5px;
+    margin: 0px 10px;
+	border: 1px solid black;
+	cursor: default;
+}
+
+.descr {
+	display:none;
+	background: #dfdfdf;
+	border: groove;
+	margin-top: -235;
+    height: 200;
+    padding: 5;
+}
+
+.poster:hover {
+	background: #adfb7d;
+}
+
+.poster:hover .descr{
+	display:block;
+	position:absolute;
+}

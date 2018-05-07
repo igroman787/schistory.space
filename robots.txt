@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /api
+Disallow: /includes
+Disallow: /service
+Disallow: /downloads
+Disallow: /error
+Disallow: /test
