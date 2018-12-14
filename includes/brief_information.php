@@ -29,6 +29,7 @@
 						} else if ($karma < 0) {
 							$karma = "<font color='red' style='font-weight: bold;'>" . nicenumber($karma) . "</font>";
 						}
+                        echo("<s1>UID: " . $buffer['uid'] . "</s1><br>");
 						DisplayText("<s1>dt_karma: " . $karma . "</s1><br>");
 						DisplayText("<s1>dt_clanName: <font style='font-weight: bold;'>" . $buffer['clanName'] . " [" . $buffer['clanTag'] . "] " . "</font></s1>");
 					?>
@@ -65,7 +66,9 @@
 						if ($gamePlayed == $gameWin) {
 							$gamePlayed = $gameWin + 1;
 						}
-			
+
+						$kb = $totalKill / $gamePlayed;
+                        $kb = round($kb, 2);
 						$kd = $totalKill / $totalDeath;
 						$kd = round($kd, 2);
 						$kda = ($totalKill + $totalAssists) / $totalDeath;
@@ -74,7 +77,8 @@
 						$wr = round($wr, 2);
 						$wl = $gameWin / ($gamePlayed - $gameWin);
 						$wl = round($wl, 2);
-						
+
+                        echo("<s1>K/B: <font style='font-weight: bold;'>" . $kb . "</font></s1><br>");
 						echo("<s1>K/D: <font style='font-weight: bold;'>" . $kd . "</font></s1><br>");
 						echo("<s1>KDA: <font style='font-weight: bold;'>" . $kda . "</font></s1><br>");
 						echo("<s1>WinRate: <font style='font-weight: bold;'>" . $wr*100 . "%</font></s1><br>");

@@ -14,7 +14,7 @@
 	
 	# input COOKIE and GET
 	if (empty($_COOKIE["gamepar"])) {
-		$gamepar = "kd, kda, wr, wl, kd2, kda2, wr2, wl2, gamePlayed2";
+		$gamepar = "nickname, clanName, clanTag, kd, kda, wr, wl, kd2, kda2, wr2, wl2, gamePlayed2";
 	} else {
 		$gamepar = test_input($_COOKIE["gamepar"]);
 	}
@@ -44,7 +44,7 @@
 	$db_table_to_show = 'uid_' . $uid;
 	$qr_result = mysql_query("SELECT * FROM " . $db_table_to_show . " ORDER BY date DESC LIMIT " . $limit)
 	or die("Could not find: " . mysql_error());
-	
+
 	$outputArray = array();
 	while($data = mysql_fetch_array($qr_result))
 	{
@@ -75,7 +75,7 @@
 	include_once('includes/brief_information.php');
 	
 	// Отображаем таблицу
-	ArrayToTable($outputArray, "date, uid, nickname, clanName, clanTag, " . $gamepar);
+	ArrayToTable($outputArray, "date, " . $gamepar);
 	
 	# input footer
 	include_once('includes/footer.php');

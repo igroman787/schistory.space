@@ -142,11 +142,12 @@
 		<div id="bottom" style="margin-top: 30px">
 			<div id="left">
 				<?php DisplayText("<s2>dt_top100_gamePlayed2_text</s2>") ?>
-				<?php ArrayToTable2(top100("gamePlayed2"), "gamePlayed2, gameWin2") ?>
+				<?php ArrayToTable2(top100("gamePlayed2, gameWin2"), "gamePlayed2, gameWin2") ?>
 			</div>
 			<div id="right">
 				<?php DisplayText("<s2>dt_top100_kd2_text</s2>") ?>
-				<?php ArrayToTable2(top100("kd2"), "kd2") ?>
+				<?php // отсекаем из топа педобиров и статистически недостаточно сыгравших
+                ArrayToTable2(top100("kd2", 5000, 10), "kd2") ?>
 			</div>
 		</div>
 	</body>
@@ -183,10 +184,13 @@
 		return $result;
 	}
 	
-	function top100($sort) {
+	function top100($sort, $minEffRate=0, $minGamePlayed=0) {
 		include_once 'includes/mysql.php';
-		
+		if ($minEffRate !== 0) {
+		$sql = "SELECT * FROM top100 WHERE gamePlayed!=gamePlayed2 AND gamePlayed2>" .$minGamePlayed. " AND effRating>" . $minEffRate . " ORDER BY " . $sort .  " DESC LIMIT 100";
+        } else {
 		$sql = "SELECT * FROM top100 WHERE gamePlayed!=gamePlayed2 ORDER BY " . $sort .  " DESC LIMIT 100";
+		}
 		$qr_result = MysqlRequest("sc_history_db", $sql);
 		
 		$outputArray = [];
@@ -213,11 +217,10 @@
 		
 		if ($defgameopt == "machine")
 		{
-			DisplayText('<th>uid</th>');
+		    // uid это техническая информация не нужная в рейтинге, он не меняется потому отдельная колонка для него не нужна
 			DisplayText('<th>nickname</th>');
 			DisplayText('<th>clanTag</th>');
 		} else {
-			DisplayText('<th>dt_uid</th>');
 			DisplayText('<th>dt_nickname</th>');
 			DisplayText('<th>dt_clanTag</th>');
 		}
@@ -238,8 +241,7 @@
 		// выводим в HTML-таблицу все данные клиентов из таблицы MySQL 
 		foreach ($inputArray as &$data) { 
 			echo('<tr>');
-			echo('<td>' . '<a href="userinfo.php?uid=' . $data['uid'] . '" target="_blank">' . $data['uid'] . '</a></td>');
-			echo('<td>' . $data['nickname'] . '</td>');
+			echo('<td>' . '<a href="userinfo.php?uid=' . $data['uid'] . '" target="_blank">' . $data['nickname'] . '</a></td>');
 			echo('<td>' . $data['clanTag'] . '</td>');
 			foreach ($sort_list as &$value) {
 				echo('<td>' . $data[$value] . '</td>');

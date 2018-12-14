@@ -61,7 +61,13 @@
 			if (empty($gamePlayed_old)) {
 				$gamePlayed_old = 0;
 			}
-			
+
+            if ($gamePlayed == 0) {
+                $gamePlayed = 1;
+            }
+
+            $kb = $totalKill / $gamePlayed;
+            $kb = round($kb, 2);
 			$kd = $totalKill / $totalDeath;
 			$kd = round($kd, 2);
 			$kda = ($totalKill + $totalAssists) / $totalDeath;
@@ -78,7 +84,15 @@
 			}
 			$kd2 = $kd2_num / $kd2_den;
 			$kd2 = round($kd2, 2);
-			
+
+            $kb2_den = $gamePlayed - $gamePlayed_old;
+            $kb2_num = $totalKill - $totalKill_old;
+            if ($kb2_den == 0) {
+                $kb2_den = 1;
+            }
+            $kb2 = $kb2_num / $kb2_den;
+            $kb2 = round($kb2, 2);
+
 			$kda2_num = ($totalKill - $totalKill_old) + ($totalAssists - $totalAssists_old);
 			$kda2_den = $totalDeath - $totalDeath_old;
 			if ($kda2_den == 0) {
@@ -132,7 +146,11 @@
 					echo('<td>' . $kd . '</td>');
 				} else if ($machinevalue == "kd2") {
 					echo('<td>' . $kd2 . '</td>');
-				} else if ($machinevalue == "kda") {
+				}  else if ($machinevalue == "kb") {
+                    echo('<td>' . $kb . '</td>');
+                } else if ($machinevalue == "kb2") {
+                    echo('<td>' . $kb2 . '</td>');
+                } else if ($machinevalue == "kda") {
 					echo('<td>' . $kda . '</td>');
 				} else if ($machinevalue == "kda2") {
 					echo('<td>' . $kda2 . '</td>');
