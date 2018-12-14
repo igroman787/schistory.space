@@ -134,12 +134,7 @@
 			foreach ($sort_list as &$machinevalue) {
 				if ($machinevalue == "date") {
 					echo('<td>' . $date . '</td>');
-				} else if ($machinevalue == "uid") {
-					if ($is_link) {
-						echo('<td>' . '<a href="userinfo.php?uid=' . $data['uid'] . '" target="_blank">' . $data['uid'] . '</a></td>');
-					} else {
-						echo('<td>' . $data['uid'] . '</td>');
-					}
+					// столбец UID выпилен потому что значение неизменно, UID в шапке
 				} else if ($machinevalue == "gamePlayed2") {
 					echo('<td>' . $gamePlayed2 . '</td>');
 				} else if ($machinevalue == "kd") {

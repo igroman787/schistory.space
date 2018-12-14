@@ -14,12 +14,14 @@
 	
 	# input COOKIE and GET
 	if (empty($_COOKIE["gamepar"])) {
-		$gamepar = "nickname, clanName, clanTag, kd, kda, wr, wl, kd2, kda2, wr2, wl2, gamePlayed2";
+		// самые полезные (на мой взгляд) параметры по дефолту, менее востребованные включаются отдельно
+		$gamepar = "nickname, clanName, clanTag, kd, kb, wr, kd2, kb2, wr2, gamePlayed2";
 	} else {
 		$gamepar = test_input($_COOKIE["gamepar"]);
 	}
 	if (empty($_COOKIE["limit"])) {
-		$limit = 1000;
+		// дефолтный лимит месяц, чтобы новым пользователям не вываливалась сразу громоздкая таблица, кому надо больше расширят
+		$limit = 30;
 	} else {
 		$limit = test_input($_COOKIE["limit"]);
 	}
