@@ -126,9 +126,9 @@ footer {
 	display:none;
 	background: #dfdfdf;
 	border: groove;
-	margin-top: -235;
-    height: 200;
-    padding: 5;
+	margin-top: -540;
+	height: 500;
+	padding: 5;
 }
 
 .poster:hover {
