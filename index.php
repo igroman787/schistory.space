@@ -144,12 +144,17 @@
 				<?php DisplayText("<s2>dt_top100_gamePlayed2_text</s2>") ?>
 				<?php ArrayToTable2(top100("gamePlayed2, gameWin2"), "gamePlayed2, gameWin2") ?>
 			</div>
+            <div id="mid">
+                <?php // TODO для _kb2_ нужно вставить текст типа "лучшие убивцы за сутки" в таблицу трансляции
+                DisplayText("<s2>dt_top100_kb2_text</s2>") ?>
+                <?php ArrayToTable2(top100("kb2",5000, 10, true), "kb2") ?>
+            </div>
 			<div id="right">
 				<?php DisplayText("<s2>dt_top100_kd2_text</s2>") ?>
 				<?php // отсекаем из топа педобиров и статистически недостаточно сыгравших
                 ArrayToTable2(top100("kd2", 5000, 10), "kd2") ?>
 			</div>
-		</div>
+        </div>
 	</body>
 	
 	<?php
@@ -184,10 +189,16 @@
 		return $result;
 	}
 	
-	function top100($sort, $minEffRate=0, $minGamePlayed=0) {
+	function top100($sort, $minEffRate=0, $minGamePlayed=0, $kb = false) {
 		include_once 'includes/mysql.php';
 		if ($minEffRate !== 0) {
-		$sql = "SELECT * FROM top100 WHERE gamePlayed!=gamePlayed2 AND gamePlayed2>" .$minGamePlayed. " AND effRating>" . $minEffRate . " ORDER BY " . $sort .  " DESC LIMIT 100";
+		    if ($kb === false) {
+                $sql = "SELECT * FROM top100 WHERE gamePlayed!=gamePlayed2 AND gamePlayed2>" .$minGamePlayed. " AND effRating>" . $minEffRate . " ORDER BY " . $sort .  " DESC LIMIT 100";
+            } else {
+		        // если включен флаг kb вычисляем доп поле убийств за бой в день. *1.0 для приведения целого к float
+                $sql = "SELECT uid, nickname, clanTag, (ROUND( (totalKill2*1.0 / gamePlayed2*1.0), 2) as kb2) FROM top100 WHERE gamePlayed!=gamePlayed2 AND gamePlayed2>" .$minGamePlayed. " AND effRating>" . $minEffRate . " ORDER BY " . $sort .  " DESC LIMIT 100";
+            }
+
         } else {
 		$sql = "SELECT * FROM top100 WHERE gamePlayed!=gamePlayed2 ORDER BY " . $sort .  " DESC LIMIT 100";
 		}
@@ -217,7 +228,7 @@
 		
 		if ($defgameopt == "machine")
 		{
-		    // uid это техническая информация не нужная в рейтинге, он не меняется потому отдельная колонка для него не нужна
+		    // uid это техническая информация не нужная пользователям в рейтинге, IMHO
 			DisplayText('<th>nickname</th>');
 			DisplayText('<th>clanTag</th>');
 		} else {

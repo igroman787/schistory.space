@@ -100,13 +100,20 @@ footer {
 
 #left {
 	float: left;
-	width: 54%;
-	min-width: 350px;
+	width: 35%;
+	min-width: 300px;
+}
+
+#mid {
+	float: left;
+	width: 30%;
+	min-width: 250px;
 }
 
 #right {
+	float: right;
+	width: 30%;
 	min-width: 250px;
-	margin-left: 55%;
 }
 
 #bottom {
