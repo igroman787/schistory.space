@@ -189,14 +189,14 @@ class Clan(Base):
 
 	def GetClanNameModel(self):
 		if self.clanHistoryModel:
-			return self.clanHistoryModel[-1].clannameModel
+			return self.clanHistoryModel[-1].clanNameModel
 		else:
 			return None
 	#end define
 
 	def GetClanRatingModel(self):
 		if self.clanHistoryModel:
-			return self.clanHistoryModel[-1].clanratingModel
+			return self.clanHistoryModel[-1].clanRatingModel
 		else:
 			return None
 	#end define

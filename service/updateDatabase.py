@@ -43,7 +43,7 @@ def Init():
 	localbuffer["localdbFileName"] = myName + ".db"
 
 	# Start logging
-	threading.Thread(target=Logging, name="Logging").start()
+	threading.Thread(target=Logging, name="Logging", daemon=True).start()
 
 	# First start up
 	if not os.path.isfile(localbuffer["localdbFileName"]):
@@ -74,7 +74,7 @@ def FirstStartUp():
 	localdb["mysql"]["user"] = "editor"
 	localdb["mysql"]["passwd"] = "passwd44c4"
 	localdb["mysql"]["dbName"] = "schistory"
-	localdb["mysql"]["limit"] = 3000
+	localdb["mysql"]["limit"] = 100
 	localdb["mysql"]["offset"] = 0
 	localdb["mysql"]["usingThread"] = list()
 	localdb["scURL"] = "http://gmt.star-conflict.com/pubapi/v1/userinfo.php?nickname="
@@ -436,7 +436,6 @@ def CheckDB():
 	AddLog("Start CheckDB function.", "debug")
 	# Create MySQL connetion
 	engine, session = CreateConnectToDB()
-	engine.echo = True
 	conn = engine.connect()
 
 	s = SelectHaving(Nickname.nickname)
@@ -662,6 +661,4 @@ class bcolors:
 if __name__ == "__main__":
 	Init()
 	General()
-	AddLog("Done.")
-	sys.exit()
 #end if
