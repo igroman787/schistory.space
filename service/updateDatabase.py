@@ -1,349 +1,638 @@
-﻿import os
+#!/usr/bin/env python3
+# -*- coding: utf_8 -*-
+
+# Before starting this script run the following steps: 
+# 1. Install:
+#		apt-get install mysql-server mysql-client libmysqlclient-dev
+#		pip3 install psutil mysqlclient sqlalchemy
+# 2. Create user and DB in MySQL
+#		CREATE USER 'editor'@'localhost' IDENTIFIED BY 'passwd44c4';
+#		GRANT ALL PRIVILEGES ON schistory.* TO 'editor'@'localhost';
+#		CREATE DATABASE schistory;
+# 3. Restore DB:
+#		wget https://raw.githubusercontent.com/igroman787/schistory.space/master/schistory.sql.zip
+#		unzip schistory.sql.zip
+#		mysql schistory < schistory.sql
+
+import os
 import sys
 import time
-from time import sleep
-import socket
-import threading
-import MySQLdb
-import gc
-import urllib.request
 import json
-import linecache
+import psutil
+import threading
+from urllib.request import urlopen
+import datetime as DateTimeLibrary
+from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.sql import func, select
+
+from models import *
 
 
-host = ''
-port = 4800
-packetLength = 2048
+def Init():
+	# Set global variables
+	global localdb, localbuffer
+	localdb = dict()
+	localbuffer = dict()
+	localbuffer["logList"] = list()
+	localbuffer["cidList"] = list()
+	localbuffer["clanList"] = list()
 
-mysqlHost = "localhost"
-mysqlUser = "editor"
-mysqlPass = "5ohnn0"
+	# Get program, log and database file name
+	myName = GetMyName()
+	localbuffer["logFileName"] = myName + ".log"
+	localbuffer["localdbFileName"] = myName + ".db"
 
+	# Start logging
+	threading.Thread(target=Logging, name="Logging").start()
 
+	# First start up
+	if not os.path.isfile(localbuffer["localdbFileName"]):
+		FirstStartUp()
 
-def ConnectToDataBase(user, passwd, db):
-	try:
-		conn = MySQLdb.connect(host=mysqlHost, user=user, passwd=passwd, db=db)
-		cur = conn.cursor(MySQLdb.cursors.DictCursor)
-		return conn, cur
-	except MySQLdb.Error as err:
-		AddLog("ConnectToDataBase: " + str(err), "error")
+	# Remove old log file
+	if (localdb["isDeleteOldLogFile"] == True and 
+		os.path.isfile(localbuffer["logFileName"]) == True):
+		os.remove(localbuffer["logFileName"])
+
+	# Logging the start of the program
+	AddLog("Start program " + myName)
+
+	# Create all tables
+	engine, session = CreateConnectToDB()
+	Base.metadata.create_all(engine)
+	CloseDBConnect(engine, session)
 #end define
 
-def DataBaseRequest(conn, cur, sql):
-	try:
-		result = cur.execute(sql)
-		row = cur.fetchall()
-		buffer = sql.lower()
-		if "select" not in buffer:
-			conn.commit()
-		return row, result
-	except MySQLdb.Error as err:
-		AddLog("DataBaseRequest: " + sql, "debug")
-		AddLog("DataBaseRequest: " + str(err), "error")
-#end define
-
-def DataBaseConnectionClose(conn, cur):
-	cur.close()
-	conn.close()
-	gc.collect()
-#end define
-
-def RememberLostUid(uid):
-	isUidLost = True
-	conn, cur = ConnectToDataBase(mysqlUser, mysqlPass, "sc_history_db")
-	sql = "SELECT * FROM nickname_uid WHERE uid='" + str(uid) + "'"
-	row, result = DataBaseRequest(conn, cur, sql)
-	for user in row:
-		webform_json = GetInformationFromSC(user['nickname'])
-		if (webform_json != None and webform_json['code'] == 0 and user['uid'] == webform_json['data']['uid']):
-			isUidLost = False
-	if (isUidLost):
-		sql = "INSERT INTO lost_uids (uid) VALUES ('" + str(uid) + "')"
-		DataBaseRequest(conn, cur, sql)
-	DataBaseConnectionClose(conn, cur)
-#end define
-
-def ScanInformation(row):
-	AddLog("Start ScanInformation", "debug")
-	
-	try:
-		conn1, cur1 = ConnectToDataBase(mysqlUser, mysqlPass, "sc_history_db")
-		conn2, cur2 = ConnectToDataBase(mysqlUser, mysqlPass, "sc_clan_db")
-		data_now = time.strftime('%Y-%m-%d')
-		for user in row:
-			uid = user['uid']
-			nickname = user['nickname']
-			webform_json = GetInformationFromSC(nickname)
-			if webform_json == None:
-				AddLog("I'm crying because I can't get a candy ;(", "error")
-			elif webform_json['code'] == 1: # If invalid nickname
-				RememberLostUid(uid)
-				DeleteInTheTop100(uid)
-			elif webform_json['code'] == 0: # If everything is ok
-				data = webform_json['data']
-				WriteInToMySQL(data_now, conn1, conn2, cur1, cur2, uid, nickname, data)
-		DataBaseConnectionClose(conn1, cur1)
-		DataBaseConnectionClose(conn2, cur2)
-	except Exception as err:
-		AddLog("Critical error: " + str(err), "error")
+def FirstStartUp():
+	global localdb
+	localdb["isLimitLogFile"] = False
+	localdb["isDeleteOldLogFile"] = True
+	localdb["logLevel"] = "info" # info || debug 
+	localdb["threadNumber"] = 16 * psutil.cpu_count()
+	localdb["mysql"] = dict()
+	localdb["mysql"]["host"] = "localhost"
+	localdb["mysql"]["user"] = "editor"
+	localdb["mysql"]["passwd"] = "passwd44c4"
+	localdb["mysql"]["dbName"] = "schistory"
+	localdb["mysql"]["limit"] = 3000
+	localdb["mysql"]["offset"] = 0
+	localdb["mysql"]["usingThread"] = list()
+	localdb["scURL"] = "http://gmt.star-conflict.com/pubapi/v1/userinfo.php?nickname="
 #end define
 
 def General():
-	AddLog("Start General function", "debug")
+	global localdb
+	AddLog("Start General function.", "debug")
 	RecordStartTime()
-	
-	# Clear Lost Uids
-	conn, cur = ConnectToDataBase(mysqlUser, mysqlPass, "sc_history_db")
-	row, result = DataBaseRequest(conn, cur, "DELETE FROM lost_uids")
-	DataBaseConnectionClose(conn, cur)
-	
-	# Find all users in DB
-	conn, cur = ConnectToDataBase(mysqlUser, mysqlPass, "sc_history_db")
-	row, result = DataBaseRequest(conn, cur, "SELECT * FROM nickname_uid")
-	DataBaseConnectionClose(conn, cur)
-	
-	# Discover all user from SC
-	threadNumber = 10
-	chunkRow = chunkIt(row, threadNumber)
-	for i in range(threadNumber):
-		threading.Thread(target=ScanInformation, args=(chunkRow[i],)).start()
+
+	# Hand out work
+	threadCount_old = threading.active_count()
+	for i in range(localdb["threadNumber"]):
+		threading.Thread(target=TryScanInformation).start()
+
+	# Wait for the end of work
 	while True:
-		sleep(1)
-		if (len(threading.enumerate()) == 1):
+		time.sleep(10)
+		threadCount_new = threading.active_count()
+		AddLog("threads: {0} -> {1}".format(threadCount_new, threadCount_old), "info")
+		if (threadCount_old == threadCount_new):
 			break
 	#end while
+	
+	# Return const
+	localdb["mysql"]["offset"] = 0
+
+	# Write clans to DB
+	SaveClansToDB()
+
+	# Check DB
+	CheckDB()
 	
 	RecordEndTime()
 #end define
 
-def WriteInToMySQL(data_now, conn1, conn2, cur1, cur2, uid, nickname, data):
-	AddLog("Start WriteInToMySQL " + str(uid), "debug")
-	
-	if uid != data['uid']:
-		AddLog("WriteInToMySQL: uid from DB doesn't coincide with uid from SC", "warning")
-		return
-	#end if
-	
-	effRating = karma = prestigeBonus = gamePlayed = gameWin = totalAssists = totalBattleTime = totalDeath = totalDmgDone = totalHealingDone = totalKill = totalVpDmgDone = 0
-	clanName = clanTag = ''
-	
-	serchText = 'effRating'
-	if (serchText in data):
-		effRating = int(data[serchText])
-	serchText = 'karma'	
-	if (serchText in data):
-		karma = int(data[serchText])
-	serchText = 'prestigeBonus'
-	if (serchText in data):
-		prestigeBonus = float(data[serchText]) # double
-	#end if
-	
-	serchText = 'pvp'
-	if (serchText in data):
-		pvp = data[serchText]
-		serchText = 'gamePlayed'
-		if (serchText in pvp):
-			gamePlayed = int(pvp[serchText])
-		serchText = 'gameWin'
-		if (serchText in pvp):
-			gameWin = int(pvp[serchText])
-		serchText = 'totalAssists'
-		if (serchText in pvp):
-			totalAssists = int(pvp[serchText])
-		serchText = 'totalBattleTime'
-		if (serchText in pvp):
-			totalBattleTime = int(pvp[serchText])
-		serchText = 'totalDeath'
-		if (serchText in pvp):
-			totalDeath = int(pvp[serchText])
-		serchText = 'totalDmgDone'
-		if (serchText in pvp):
-			totalDmgDone = int(pvp[serchText])
-		serchText = 'totalHealingDone'
-		if (serchText in pvp):
-			totalHealingDone = int(pvp[serchText])
-		serchText = 'totalKill'
-		if (serchText in pvp):
-			totalKill = int(pvp[serchText])
-		serchText = 'totalVpDmgDone'
-		if (serchText in pvp):
-			totalVpDmgDone = int(pvp[serchText])
-	#end if
-	
-	serchText = 'clan'
-	if (serchText in data):
-		clan = data[serchText]
-		serchText = 'name'
-		if (serchText in clan):
-			clanName = clan[serchText]
-		serchText = 'tag'
-		if (serchText in clan):
-			clanTag = clan[serchText]
-	#end if
-	
-	
-	WriteInTheUserHistory(data_now, conn1, cur1, uid, nickname, effRating, karma, prestigeBonus, gamePlayed, gameWin, totalAssists, totalBattleTime, totalDeath, totalDmgDone, totalHealingDone, totalKill, totalVpDmgDone, clanName, clanTag)
-	
-	WriteInTheTop100(conn1, cur1, uid, nickname, effRating, karma, prestigeBonus, gamePlayed, gameWin, totalAssists, totalBattleTime, totalDeath, totalDmgDone, totalHealingDone, totalKill, totalVpDmgDone, clanName, clanTag)
-	
-	WriteInTheCorporationsHistory(data_now, conn2, cur2, effRating, karma, prestigeBonus, gamePlayed, gameWin, totalAssists, totalBattleTime, totalDeath, totalDmgDone, totalHealingDone, totalKill, totalVpDmgDone, clanName, clanTag)
-	
-#end define
-
-def WriteInTheUserHistory(data_now, conn, cur, uid, nickname, effRating, karma, prestigeBonus, gamePlayed, gameWin, totalAssists, totalBattleTime, totalDeath, totalDmgDone, totalHealingDone, totalKill, totalVpDmgDone, clanName, clanTag):
-	sql = "INSERT INTO uid_" + str(uid) + " (date, uid, nickname, effRating, karma, prestigeBonus, gamePlayed, gameWin, totalAssists, totalBattleTime, totalDeath, totalDmgDone, totalHealingDone, totalKill, totalVpDmgDone, clanName, clanTag) VALUES ('" + data_now + "', '" + str(uid) + "', '" + str(nickname) + "', '" + str(effRating) + "', '" + str(karma) + "', '" + str(prestigeBonus) + "', '" + str(gamePlayed) + "', '" + str(gameWin) + "', '" + str(totalAssists) + "', '" + str(totalBattleTime) + "', '" + str(totalDeath) + "', '" + str(totalDmgDone) + "', '" + str(totalHealingDone) + "', '" + str(totalKill) + "', '" + str(totalVpDmgDone) + "', '" + clanName + "', '" + clanTag + "');"
-	
-	DataBaseRequest(conn, cur, sql)
-#end define
-
-def WriteInTheCorporationsHistory(data_now, conn, cur, effRating, karma, prestigeBonus, gamePlayed, gameWin, totalAssists, totalBattleTime, totalDeath, totalDmgDone, totalHealingDone, totalKill, totalVpDmgDone, clanName, clanTag):
-	AddLog("Start WriteInTheCorporationsHistory", "debug")
-	
-	# Return if user is not in the clan
-	if (len(clanName) == 0):
-		return
-	
-	sql = "SELECT * FROM corporations_history WHERE date='" + data_now + "' and BINARY clanName='" + clanName + "' and BINARY clanTag='" + clanTag + "'"
-	row, result = DataBaseRequest(conn, cur, sql)
-	
-	if (result == 0):
-		sql = "INSERT INTO corporations_history (date, clanName, clanTag, effRating, karma, prestigeBonus, gamePlayed, gameWin, totalAssists, totalBattleTime, totalDeath, totalDmgDone, totalHealingDone, totalKill, totalVpDmgDone, number) VALUES ('" + data_now + "', '" + clanName + "', '" + clanTag + "', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);"
-		DataBaseRequest(conn, cur, sql)
-	
-	sql = "UPDATE corporations_history SET number = number + 1, effRating = effRating + " + str(effRating) + ", karma = karma + " + str(karma) + ", prestigeBonus = prestigeBonus + " + str(prestigeBonus) + ", gamePlayed = gamePlayed + " + str(gamePlayed) + ", gameWin = gameWin + " + str(gameWin) + ", totalAssists = totalAssists + " + str(totalAssists) + ", totalBattleTime = totalBattleTime + " + str(totalBattleTime) + ", totalDeath = totalDeath + " + str(totalDeath) + ", totalDmgDone = totalDmgDone + " + str(totalDmgDone) + ", totalHealingDone = totalHealingDone + " + str(totalHealingDone) + ", totalKill = totalKill + " + str(totalKill) + ", totalVpDmgDone = totalVpDmgDone + " + str(totalVpDmgDone) + " WHERE date = '" + data_now + "' and BINARY clanName = '" + clanName + "' and BINARY clanTag = '" + clanTag+ "'"
-	
-	DataBaseRequest(conn, cur, sql)
-#end define
-
-def WriteInTheTop100(conn, cur, uid, nickname, effRating, karma, prestigeBonus, gamePlayed, gameWin, totalAssists, totalBattleTime, totalDeath, totalDmgDone, totalHealingDone, totalKill, totalVpDmgDone, clanName, clanTag):
-	sql = "SELECT * FROM top100 WHERE BINARY uid='" + str(uid) + "'"
-	row, result = DataBaseRequest(conn, cur, sql)
-	if result > 0:
-		sql = "DELETE FROM top100 WHERE uid='" + str(uid) + "'"
-		DataBaseRequest(conn, cur, sql)
-	#end if
-	
-	effRating_old = karma_old = prestigeBonus_old = gamePlayed_old = gameWin_old = totalAssists_old = totalBattleTime_old = totalDeath_old = totalDmgDone_old = totalHealingDone_old = totalKill_old = totalVpDmgDone_old = 0
-	
-	if len(row) > 0:
-		effRating_old = int(float(row[0]['effRating']))
-		karma_old = int(float(row[0]['karma']))
-		prestigeBonus_old = float(row[0]['prestigeBonus']) # double
-		gamePlayed_old = int(float(row[0]['gamePlayed']))
-		gameWin_old = int(float(row[0]['gameWin']))
-		totalAssists_old = int(float(row[0]['totalAssists']))
-		totalBattleTime_old = int(float(row[0]['totalBattleTime']))
-		totalDeath_old = int(float(row[0]['totalDeath']))
-		totalDmgDone_old = int(float(row[0]['totalDmgDone']))
-		totalHealingDone_old = int(float(row[0]['totalHealingDone']))
-		totalKill_old = int(float(row[0]['totalKill']))
-		totalVpDmgDone_old = int(float(row[0]['totalVpDmgDone']))
-	#end if
-	
-	if totalDeath != 0:
-		kd = totalKill / totalDeath
-		kda = (totalKill + totalAssists) / totalDeath
-		kd = float("%.2f" % kd) # double
-		kda = float("%.2f" % kda) # double
-	else:
-		kd = kda = 0
-	if gamePlayed != 0:
-		wr = gameWin / gamePlayed
-		wr = float("%.2f" % wr) # double
-	else:
-		wr = 0
-	if (gamePlayed - gameWin) != 0:
-		wl = gameWin / (gamePlayed - gameWin)
-		wl = float("%.2f" % wl) # double
-	else:
-		wl = gameWin / 1
-	#end if
-	
-	effRating2 = effRating - effRating_old
-	karma2 = karma - karma_old
-	prestigeBonus2 = prestigeBonus - prestigeBonus_old
-	gamePlayed2 = gamePlayed - gamePlayed_old
-	gameWin2 = gameWin - gameWin_old
-	totalAssists2 = totalAssists - totalAssists_old
-	totalBattleTime2 = totalBattleTime - totalBattleTime_old
-	totalDeath2 = totalDeath - totalDeath_old
-	totalDmgDone2 = totalDmgDone - totalDmgDone_old
-	totalHealingDone2 = totalHealingDone - totalHealingDone_old
-	totalKill2 = totalKill - totalKill_old
-	totalVpDmgDone2 = totalVpDmgDone - totalVpDmgDone_old
-	
-	if totalDeath2 != 0:
-		kd2 = totalKill2 / totalDeath2
-		kda2 = (totalKill2 + totalAssists2) / totalDeath2
-		kd2 = float("%.2f" % kd2) # double
-		kda2 = float("%.2f" % kda2) # double
-	else:
-		kd2 = kda2 = 0
-	if gamePlayed2 != 0:
-		wr2 = gameWin2 / gamePlayed2
-		wr2 = float("%.2f" % wr2) # double
-	else:
-		wr2 = 0
-	if (gamePlayed2 - gameWin2) != 0:
-		wl2 = gameWin2 / (gamePlayed2 - gameWin2)
-		wl2 = float("%.2f" % wl2) # double
-	else:
-		wl2 = 0
-	
-	sql = "INSERT INTO top100 (uid, nickname, kd, kd2, kda, kda2, wr, wr2, wl, wl2, effRating, effRating2, karma, karma2, prestigeBonus, prestigeBonus2, gamePlayed, gamePlayed2, gameWin, gameWin2, totalAssists, totalAssists2, totalBattleTime, totalBattleTime2, totalDeath, totalDeath2, totalDmgDone, totalDmgDone2, totalHealingDone, totalHealingDone2, totalKill, totalKill2, totalVpDmgDone, totalVpDmgDone2, clanName, clanTag) VALUES ('" + str(uid) + "', '" + str(nickname) + "', '" + str(kd) + "', '" + str(kd2) + "', '" + str(kda) + "', '" + str(kda2) + "', '" + str(wr) + "', '" + str(wr2) + "', '" + str(wl) + "', '" + str(wl2) + "', '" + str(effRating) + "', '" + str(effRating2) + "', '" + str(karma) + "', '" + str(karma2) + "', '" + str(prestigeBonus) + "', '" + str(prestigeBonus2) + "', '" + str(gamePlayed) + "', '" + str(gamePlayed2) + "', '" + str(gameWin) + "', '" + str(gameWin2) + "', '" + str(totalAssists) + "', '" + str(totalAssists2) + "', '" + str(totalBattleTime) + "', '" + str(totalBattleTime2) + "', '" + str(totalDeath) + "', '" + str(totalDeath2) + "', '" + str(totalDmgDone) + "', '" + str(totalDmgDone2) + "', '" + str(totalHealingDone) + "', '" + str(totalHealingDone2) + "', '" + str(totalKill) + "', '" + str(totalKill2) + "', '" + str(totalVpDmgDone) + "', '" + str(totalVpDmgDone2) + "', '" + str(clanName) + "', '" + str(clanTag) + "');"
-	
-	DataBaseRequest(conn, cur, sql)
-#end define
-
-def DeleteInTheTop100(uid):
-	AddLog("Start DeleteInTheTop100", "debug")
-	conn, cur = ConnectToDataBase(mysqlUser, mysqlPass, "sc_history_db")
-	sql = "DELETE FROM top100 WHERE uid='" + str(uid) + "'"
-	DataBaseRequest(conn, cur, sql)
-	DataBaseConnectionClose(conn, cur)
-#end define
-
-def GetInformationFromSC(nickname):
-	scURL = "http://gmt.star-conflict.com/pubapi/v1/userinfo.php?nickname="
-	for i in range(5):
-		try:
-			webform = (urllib.request.urlopen(scURL + nickname).read()).decode("utf-8")
-			webform_json = json.loads(webform)
-			return webform_json
-		except BaseException as err:
-			AddLog("GetInformationFromSC: Attempt: " + str(i) + " " + str(err), "warning")
-			sleep(i)
-	return None
-#end define
-
 def RecordStartTime():
-	AddLog("Start RecordStartTime", "debug")
-	timestamp = int(time.time())
-	conn, cur = ConnectToDataBase(mysqlUser, mysqlPass, "other_db")
-	DataBaseRequest(conn, cur, "UPDATE timestamps SET value=" + str(timestamp) + " WHERE nomination='RecordStartTime'")
-	DataBaseConnectionClose(conn, cur)
+	localbuffer["start"] = int(time.time())
+	localbuffer["count"] = 0
+
+	# Create MySQL connect
+	engine, session = CreateConnectToDB()
+
+	# Get module from DB
+	timeName = "startDataBaseUpdateTime"
+	updateTime = session.query(DataBaseUpdateTime).filter_by(name=timeName).first()
+	if not updateTime:
+		updateTime = DataBaseUpdateTime(name=timeName)
+		session.add(updateTime)
+	#end if
+
+	# Update datetime
+	updateTime.datetime=DateTimeLibrary.datetime.utcnow()
+
+	# Close DB connect
+	CloseDBConnect(engine, session)
 #end define
 
 def RecordEndTime():
-	AddLog("Start RecordEndTime", "debug")
-	timestamp = int(time.time())
-	conn, cur = ConnectToDataBase(mysqlUser, mysqlPass, "other_db")
-	DataBaseRequest(conn, cur, "UPDATE timestamps SET value='" + str(timestamp) + "' WHERE nomination='RecordEndTime'")
-	DataBaseConnectionClose(conn, cur)
+	global localdb
+	end = int(time.time())
+	total = end - localbuffer["start"]
+	ups = int(localbuffer["count"]/total)
+	AddLog("Total time: {0}sec. Total users: {1}".format(total, localbuffer["count"]))
+	AddLog("{0}ups (user per second). Total threads: {1}".format(ups, localdb["threadNumber"]))
+
+	# Create MySQL connect
+	engine, session = CreateConnectToDB()
+
+	# Get module from DB
+	timeName = "endDataBaseUpdateTime"
+	updateTime = session.query(DataBaseUpdateTime).filter_by(name=timeName).first()
+	if not updateTime:
+		updateTime = DataBaseUpdateTime(name=timeName)
+		session.add(updateTime)
+	#end if
+
+	# Update datetime
+	updateTime.datetime=DateTimeLibrary.datetime.utcnow()
+
+	# Close DB connection
+	CloseDBConnect(engine, session)
 #end define
 
-def AddLog(inputText, mode='info'):
-	myName = (sys.argv[0])[:(sys.argv[0]).rfind('.')]
-	logName = myName + ".log"
-	timeText = time.strftime('%d.%m.%Y, %H:%M:%S'.ljust(20, " "))
-	modeText = ('[' + mode + ']').ljust(8, " ")
-	logText = timeText + modeText + inputText
-	file = open(logName, 'a')
-	file.write(logText + "\n")
-	file.close()
+def TryScanInformation():
+	try:
+		ScanInformation()
+	except Exception as err:
+		AddLog("TryScanInformation: {0}".format(err), "error")
+		GiveDBConnect()
+#end define
+
+def ScanInformation():
+	global localdb
+	AddLog("Start ScanInformation function.", "debug")
+
+	# Create MySQL connect
+	engine, session = CreateConnectToDB()
+
+	while True:
+		# Get data from DB
+		TakeDBConnect()
+		limit = localdb["mysql"]["limit"]
+		offset = localdb["mysql"]["offset"]
+		partOfUsersList = session.query(User).limit(limit).offset(offset).all()
+		localdb["mysql"]["offset"] += limit
+		GiveDBConnect()
+
+		# Scan users
+		for user in partOfUsersList:
+			ScanUser(user=user, session=session)
+		#end for
+
+		# Break if users end
+		if (len(partOfUsersList) == 0):
+			break
+	#end while
 	
+	# Close DB connection
+	CloseDBConnect(engine, session)
+#end define
+
+def TrtScanUser():
+	try:
+		user = args.get("user")
+		session = args.get("session")
+		ScanUser(user=user, session=session)
+	except Exception as err:
+		AddLog("TrtScanUser: {0}".format(err), "error")
+#end define
+
+def ScanUser(**args):
+	user = args.get("user")
+	session = args.get("session")
+	uid = user.uid
+	nickname = user.GetNickname()
+	AddLog("Start ScanUser function. nickname: {0}. uid: {1}".format(nickname, uid), "debug")
+
+	localbuffer["count"] += 1
+	webform_json = GetDataFromSC(nickname)
+
+	# If all is bad
+	if webform_json == None:
+		AddLog("I'm crying because I can't get a candy ;(", "error")
+
+	elif (len(nickname) > 20):
+		AddLog("Bad nickname: {0}".format(nickname), "warning")
+
+	# If invalid nickname
+	elif webform_json["code"] == 1:
+		AddLog("Invalid nickname: {0}".format(nickname), "debug")
+		RememberLostUid(uid)
+
+	# If everything is ok
+	elif webform_json["code"] == 0:
+		data = webform_json["data"]
+		PrepareDataForWriteInDB(user=user, nickname=nickname, data=data, session=session)
+#end define
+
+def PrepareDataForWriteInDB(**args):
+	user = args.get("user")
+	nickname = args.get("nickname")
+	data = args.get("data")
+	session = args.get("session")
+	uid = user.uid
+	AddLog("Start PrepareDataForWriteInDB function. nickname: {0}. uid: {1}".format(nickname, uid), "debug")
+
+	# Check if uid is correct
+	if uid != data.get("uid"):
+		AddLog("PrepareDataForWriteInDB: uid from DB {0} doesn't coincide with uid from SC {1}".format(uid, data.get("uid")), "warning")
+		RememberLostUid(uid)
+		return
+	#end if
+
+	# Other
+	newNickname = GetDataFromJson(data, "nickName")
+	effRating = GetDataFromJson(data, "effRating", "int")
+	prestigeBonus = GetDataFromJson(data, "prestigeBonus", "float")
+	accountRank = GetDataFromJson(data, "accountRank", "int")
+
+	# Pvp
+	pvp = GetDataFromJson(data, "pvp")
+	pvpGamePlayed = GetDataFromJson(pvp, "gamePlayed", "int")
+	pvpGameWin = GetDataFromJson(pvp, "gameWin", "int")
+	pvpTotalAssists = GetDataFromJson(pvp, "totalAssists", "int")
+	pvpTotalBattleTime = GetDataFromJson(pvp, "totalBattleTime", "int")
+	pvpTotalDeath = GetDataFromJson(pvp, "totalDeath", "int")
+	pvpTotalDmgDone = GetDataFromJson(pvp, "totalDmgDone", "int")
+	pvpTotalHealingDone = GetDataFromJson(pvp, "totalHealingDone", "int")
+	pvpTotalKill = GetDataFromJson(pvp, "totalKill", "int")
+	pvpTotalVpDmgDone = GetDataFromJson(pvp, "totalVpDmgDone", "int")
+
+	# Pve
+	pve = GetDataFromJson(data, "pve")
+	pveGamePlayed = GetDataFromJson(pve, "gamePlayed", "int")
+
+	# Coop
+	coop = GetDataFromJson(data, "coop")
+	coopGamePlayed = GetDataFromJson(coop, "gamePlayed", "int")
+	coopGameWin = GetDataFromJson(coop, "gameWin", "int")
+	coopTotalBattleTime = GetDataFromJson(coop, "totalBattleTime", "int")
+
+	# OpenWorld
+	openWorld = GetDataFromJson(data, "openWorld")
+	openWorldKarma = GetDataFromJson(openWorld, "karma")
+
+	# Clan
+	clan = GetDataFromJson(data, "clan")
+	cid = GetDataFromJson(clan, "cid")
+	clanName = GetDataFromJson(clan, "name")
+	clanTag = GetDataFromJson(clan, "tag")
+	clanPvpRating = GetDataFromJson(clan, "pvpRating")
+	clanPveRating = GetDataFromJson(clan, "pveRating")
+
+	# Create user model
+	userModel = session.query(User).filter_by(uid=uid).first()
+	pvpModel = None
+	pveModel = None
+	coopModel = None
+	openWorldModel = None
+	otherModel = None
+
+	# Create nickname model
+	if (newNickname != nickname):
+		nickname = newNickname
+		nicknameModel = Nickname(nickname=nickname)
+	else:
+		nicknameModel = userModel.GetNicknameModel()
+	#end if
+
+	# Create PVP model
+	if pvp:
+		pvpModel = userModel.GetPvpModel()
+		if not pvpModel or pvpModel.gamePlayed != pvpGamePlayed:
+			pvpModel = PVP(gamePlayed=pvpGamePlayed, gameWin=pvpGameWin, totalAssists=pvpTotalAssists, totalBattleTime=pvpTotalBattleTime, totalDeath=pvpTotalDeath, totalDmgDone=pvpTotalDmgDone, 
+				totalHealingDone=pvpTotalHealingDone, totalKill=pvpTotalKill, totalVpDmgDone=pvpTotalVpDmgDone)
+		#end if
+	#end if
+
+	# Create PVE model
+	if pve:
+		pveModel = userModel.GetPveModel()
+		if not pveModel or pveModel.gamePlayed != pveGamePlayed:
+			pveModel = PVE(gamePlayed=pveGamePlayed)
+		#end if
+	#end if
+
+	# Create COOP model
+	if coop:
+		coopModel = userModel.GetCoopModel()
+		if not coopModel or coopModel.gamePlayed != coopGamePlayed:
+			coopModel = COOP(gamePlayed=coopGamePlayed, gameWin=coopGameWin, totalBattleTime=coopTotalBattleTime)
+		#end if
+	#end if
+
+	# Create OpenWorld model
+	if openWorld:
+		openWorldModel = userModel.GetOpenWorldModel()
+		if not openWorldModel or openWorldModel.karma != openWorldKarma:
+			openWorldModel = OpenWorld(karma=openWorldKarma)
+		#end if
+	#end if
+
+	# Create Other model
+	if effRating or prestigeBonus or accountRank:
+		otherModel = userModel.GetOtherModel()
+		if not otherModel or otherModel.effRating != effRating or otherModel.prestigeBonus != prestigeBonus or otherModel.accountRank != accountRank:
+			otherModel = Other(effRating=effRating, prestigeBonus=prestigeBonus, accountRank=accountRank)
+		#end if
+	#end if
+
+	# Create User History model
+	userHistoryModel = UserHistory(userModel=userModel, nicknameModel=nicknameModel, pvpModel=pvpModel, pveModel=pveModel, coopModel=coopModel, openworldModel=openWorldModel, 
+		otherModel=otherModel, cid=cid)
+	session.add(userHistoryModel)
+
+	# Add clan to list
+	AddClan(cid=cid, clanName=clanName, clanTag=clanTag, clanPvpRating=clanPvpRating, clanPveRating=clanPveRating)
+
+	# Write User History model to DB
+	AddLog("Start WriteInDB function. nickname: {0}. uid: {1}".format(nickname, uid), "debug")
+#end define
+
+def RememberLostUid(uid):
+	AddLog("Start RememberLostUid function. uid: {0}".format(uid), "debug")
+
+	# Create MySQL connect
+	engine, session = CreateConnectToDB()
+
+	# Get module from DB
+	lostUid = session.query(LostUid).filter_by(uid=uid).first()
+	if not lostUid:
+		lostUid = LostUid(uid=uid)
+		session.add(lostUid)
+	#end if
+
+	# Close DB connection
+	CloseDBConnect(engine, session)
+#end define
+
+def AddClan(**args):
+	cid = args.get("cid")
+	if cid not in localbuffer["cidList"]:
+		localbuffer["cidList"].append(cid)
+		localbuffer["clanList"].append(args)
+#end define
+
+def SaveClansToDB():
+	# Create MySQL connect
+	engine, session = CreateConnectToDB()
+
+	for item in localbuffer["clanList"]:
+		item["session"] = session
+		WriteClanToDB(item)
+	#end for
+
+	# Close DB connect
+	CloseDBConnect(engine, session)
+#end define
+
+def WriteClanToDB(args):
+	session = args.get("session")
+	cid = args.get("cid")
+	clanName = args.get("clanName")
+	clanTag = args.get("clanTag")
+	clanPvpRating = args.get("clanPvpRating")
+	clanPveRating = args.get("clanPveRating")
+
+	# Create Clan model
+	clanModel = session.query(Clan).filter_by(cid=cid).first()
+	if not clanModel and cid:
+		clanModel = Clan(cid=cid)
+	#end if
+
+	# Create clanname model
+	if clanModel:
+		clanNameModel = clanModel.GetClanNameModel()
+		if not clanNameModel or clanNameModel.name != clanName or clanNameModel.tag != clanTag:
+			clanNameModel = ClanName(name=clanName, tag=clanTag)
+		#end if
+	#end if
+
+	# Create Clan Rating model
+	if clanModel:
+		clanRatingModel = clanModel.GetClanRatingModel()
+		if not clanRatingModel or clanRatingModel.pvpRating != clanPvpRating or clanRatingModel.pveRating != clanPveRating:
+			clanRatingModel = ClanRating(pvpRating=clanPvpRating, pveRating=clanPveRating)
+		#end if
+	#end if
+
+	# Create Clan History model
+	if clanModel:
+		clanHistoryModel = ClanHistory(clanModel=clanModel, clanNameModel=clanNameModel, clanRatingModel=clanRatingModel)
+		session.add(clanHistoryModel)
+	#end if
+#end define
+
+def CheckDB():
+	AddLog("Start CheckDB function.", "debug")
+	# Create MySQL connetion
+	engine, session = CreateConnectToDB()
+	engine.echo = True
+	conn = engine.connect()
+
+	s = SelectHaving(Nickname.nickname)
+	result = conn.execute(s)
+	if result.rowcount > 0:
+		AddLog("Table nicknames - {0}warning{1}: Found {2} matches".format(bcolors.WARNING, bcolors.ENDC, result.rowcount), "warning")
+	else:
+		AddLog("Table nicknames - {0}OK{1}".format(bcolors.OKGREEN, bcolors.ENDC))
+	#end if
+
+	s = SelectHaving(ClanName.name)
+	result = conn.execute(s)
+	if result.rowcount > 0:
+		AddLog("Table clannames - {0}warning{1}: Found {2} matches".format(bcolors.WARNING, bcolors.ENDC, result.rowcount), "warning")
+	else:
+		AddLog("Table clannames - {0}OK{1}".format(bcolors.OKGREEN, bcolors.ENDC))
+	#end if
+
+	conn.close
+	CloseDBConnect(engine, session)
+#end define
+
+def SelectHaving(var):
+	return select([var, func.count(var)]).group_by(var).having(func.count(var)>1)
+#end define
+
+def GetDataFromJson(inputData, serchText, outputDataTypeString = "default"):
+	outputData = None
+	if (inputData != None and serchText in inputData):
+		if (outputDataTypeString == "default"):
+			outputData = inputData[serchText]
+		elif (outputDataTypeString == "int"):
+			outputData = int(inputData[serchText])
+		elif (outputDataTypeString == "float"):
+			outputData = float(inputData[serchText])
+	return outputData
+#end define
+
+def CreateConnectToDB():
+	global localdb
+	AddLog("Start CreateConnectToDB function.", "debug")
+	# Create MySQL connect
+	mysqlConnectUrl = "mysql://{0}:{1}@{2}/{3}".format(localdb["mysql"]["user"], localdb["mysql"]["passwd"], localdb["mysql"]["host"], localdb["mysql"]["dbName"])
+	engine = create_engine(mysqlConnectUrl, echo=False)
+	Session = sessionmaker(bind=engine)
+	session = Session()
+	return engine, session
+#end define
+
+def CloseDBConnect(engine, session):
+	session.commit()
+	session.close()
+	engine.dispose()
+#end define
+
+def TakeDBConnect():
+	global localdb
+	while True:
+		if (len(localdb["mysql"]["usingThread"]) > 0):
+			time.sleep(0.1)
+		else:
+			localdb["mysql"]["usingThread"].append(GetThreadName())
+			break
+#end define
+
+def GiveDBConnect():
+	global localdb
+	threadName = GetThreadName()
+	if (threadName in localdb["mysql"]["usingThread"]):
+		localdb["mysql"]["usingThread"].remove(threadName)
+#end define
+
+def GetDataFromSC(nickname):
+	global localdb
+	start = time.time()
+	outputData = None
+	for i in range(1, 4):
+		try:
+			url = localdb["scURL"] + nickname
+			webform = (urlopen(url).read()).decode("utf-8")
+			outputData = json.loads(webform)
+			break
+		except BaseException as err:
+			AddLog("GetDataFromSC: Attempt: " + str(i) + " " + str(err), "warning")
+			time.sleep(i)
+	#end for
+	end = time.time()
+	over = round(end-start, 2)
+	if (over > 1):
+		AddLog("GetDataFromSC({0}) take {1} sec".format(nickname, over), "warning")
+	return outputData
+#end define
+
+def GetThreadName():
+	return threading.currentThread().getName()
+#end define
+
+def GetMyFullName():
+	myFullName = sys.argv[0]
+	return myFullName
+#end define
+
+def GetMyName():
+	myFullName = GetMyFullName()
+	myName = myFullName[:myFullName.rfind('.')]
+	return myName
+#end define
+
+def GetMyFullPath():
+	myFullName = GetMyFullName()
+	myFullPath = os.path.abspath(myFullName)
+	return myFullPath
+#end define
+
+def GetMyPath():
+	myFullPath = GetMyFullPath()
+	myPath = myFullPath[:myFullPath.rfind('/')+1]
+	return myPath
+#end define
+
+def AddLog(inputText, mode="info"):
+	global localdb
+	inputText = "{0}".format(inputText)
+	timeText = DateTimeLibrary.datetime.utcnow().strftime("%d.%m.%Y, %H:%M:%S.%f")[:-3]
+	timeText = "{0} (UTC)".format(timeText).ljust(32, ' ')
+
+	# Pass if set log level
+	if (localdb["logLevel"] == "none"):
+		return
+	elif (localdb["logLevel"] != "debug" and mode == "debug"):
+		return
+
+	# Set color mode
+	if (mode == "info"):
+		colorStart = bcolors.INFO + bcolors.BOLD
+	elif (mode == "warning"):
+		colorStart = bcolors.WARNING + bcolors.BOLD
+	elif (mode == "error"):
+		colorStart = bcolors.ERROR + bcolors.BOLD
+	elif (mode == "debug"):
+		colorStart = bcolors.DEBUG + bcolors.BOLD
+	else:
+		colorStart = bcolors.UNDERLINE + bcolors.BOLD
+	modeText = "{0}{1}{2}".format(colorStart, "[{0}]".format(mode).ljust(10, ' '), bcolors.ENDC)
+	
+	# Set color thread
+	if (mode == "error"):
+		colorStart = bcolors.ERROR + bcolors.BOLD
+	else:
+		colorStart = bcolors.OKGREEN + bcolors.BOLD
+	threadText = "{0}{1}{2}".format(colorStart, "<{0}>".format(GetThreadName()).ljust(14, ' '), bcolors.ENDC)
+	logText = modeText + timeText + threadText + inputText
+
+	# Queue for recording
+	localbuffer["logList"].append(logText)
+
+	# Print log text
 	print(logText)
+#end define
+
+def Logging():
+	while True:
+		time.sleep(1)
+		TryWriteLogFile()
+#end define
+
+def TryWriteLogFile():
+	try:
+		WriteLogFile()
+	except Exception as err:
+		AddLog("TryWriteLogFile: {0}".format(err), "error")
+#end define
+
+def WriteLogFile():
+	logName = localbuffer["logFileName"]
+
+	file = open(logName, 'a')
+	while len(localbuffer["logList"]) > 0:
+		logText = localbuffer["logList"].pop(0)
+		file.write(logText + '\n')
+	#end for
+	file.close()
+
+	# Control log size
+	if (localdb["isLimitLogFile"] == False):
+		return
+	allline = count_lines(logName)
+	if (allline > 4096 + 256):
+		delline = allline - 4096
+		f=open(logName).readlines()
+		i = 0
+		while i < delline:
+			f.pop(0)
+			i = i + 1
+		with open(logName,'w') as F:
+			F.writelines(f)
 #end define
 
 def count_lines(filename, chunk_size=1<<13):
@@ -354,28 +643,25 @@ def count_lines(filename, chunk_size=1<<13):
 			for chunk in iter(lambda: file.read(chunk_size), ''))
 #end define
 
-def chunkIt(seq, num):
-	avg = len(seq) / float(num)
-	out = []
-	last = 0.0
-	while last < len(seq):
-		out.append(seq[int(last):int(last + avg)])
-		last += avg
-	return out
-#end define
+class bcolors:
+	DEBUG = '\033[95m'
+	INFO = '\033[94m'
+	OKGREEN = '\033[92m'
+	WARNING = '\033[93m'
+	ERROR = '\033[91m'
+	ENDC = '\033[0m'
+	BOLD = '\033[1m'
+	UNDERLINE = '\033[4m'
+#end class
 
 
 ###
 ### Start of the program
 ###
 
-myName = (sys.argv[0])[:(sys.argv[0]).rfind('.')]
-logName = myName + ".log"
-
-if os.path.isfile(logName):
-	os.remove(logName)
-
-General()
-	
-
-
+if __name__ == "__main__":
+	Init()
+	General()
+	AddLog("Done.")
+	sys.exit()
+#end if

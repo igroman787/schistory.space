@@ -1,0 +1,9 @@
+Options All -Indexes
+
+php_value max_execution_time 240
+php_value max_input_time 180
+
+<FilesMatch ".(htaccess|htpasswd|ini|phps|fla|psd|py|sh)$">
+	Order Allow,Deny
+	Deny from all
+</FilesMatch>
