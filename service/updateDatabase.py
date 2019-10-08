@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 # -*- coding: utf_8 -*-
 
-# Before starting this script run the following steps: 
-# 1. Install:
-#		apt-get install mysql-server mysql-client libmysqlclient-dev
-#		pip3 install psutil mysqlclient sqlalchemy
-# 2. Create user and DB in MySQL
-#		CREATE USER 'editor'@'localhost' IDENTIFIED BY 'passwd44c4';
-#		GRANT ALL PRIVILEGES ON schistory.* TO 'editor'@'localhost';
-#		CREATE DATABASE schistory;
-# 3. Restore DB:
-#		wget https://raw.githubusercontent.com/igroman787/schistory.space/master/schistory.sql.zip
-#		unzip schistory.sql.zip
-#		mysql schistory < schistory.sql
+'''
+This module is intended for a single DB update - saving the history of SC pilots
+It should be used through cron, for example: @daily /usr/bin/python3 /etc/schistory/updateDatabase.py
+Before starting this script run the following steps:
+1. Install:
+	apt-get install mysql-server mysql-client libmysqlclient-dev
+	pip3 install psutil mysqlclient sqlalchemy
+2. Create user and DB in MySQL
+	CREATE USER 'editor'@'localhost' IDENTIFIED BY 'passwd44c4';
+	GRANT ALL PRIVILEGES ON schistory.* TO 'editor'@'localhost';
+	CREATE DATABASE schistory;
+3. Restore DB:
+	wget https://raw.githubusercontent.com/igroman787/schistory.space/master/schistory.sql.zip
+	unzip schistory.sql.zip
+	mysql schistory < schistory.sql
+'''
 
 import os
 import sys
@@ -22,9 +26,8 @@ import psutil
 import threading
 from urllib.request import urlopen
 import datetime as DateTimeLibrary
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql import func, select
-
 from models import *
 
 
@@ -36,26 +39,29 @@ def Init():
 	localbuffer["logList"] = list()
 	localbuffer["cidList"] = list()
 	localbuffer["clanList"] = list()
+	localbuffer["selfTestingResult"] = dict()
+	localbuffer["mysqlOffset"] = 0
+
 
 	# Get program, log and database file name
 	myName = GetMyName()
 	localbuffer["logFileName"] = myName + ".log"
 	localbuffer["localdbFileName"] = myName + ".db"
 
-	# Start logging
+	# Start other threads
 	threading.Thread(target=Logging, name="Logging", daemon=True).start()
+	threading.Thread(target=SelfTesting, name="SelfTesting", daemon=True).start()
 
 	# First start up
 	if not os.path.isfile(localbuffer["localdbFileName"]):
 		FirstStartUp()
 
 	# Remove old log file
-	if (localdb["isDeleteOldLogFile"] == True and 
-		os.path.isfile(localbuffer["logFileName"]) == True):
+	if (localdb["isDeleteOldLogFile"] == True and os.path.isfile(localbuffer["logFileName"]) == True):
 		os.remove(localbuffer["logFileName"])
 
 	# Logging the start of the program
-	AddLog("Start program " + myName)
+	AddLog("Start program \"{0}\"".format(GetMyFullPath()))
 
 	# Create all tables
 	engine, session = CreateConnectToDB()
@@ -65,19 +71,21 @@ def Init():
 
 def FirstStartUp():
 	global localdb
+	### fix me! ###
 	localdb["isLimitLogFile"] = False
 	localdb["isDeleteOldLogFile"] = True
-	localdb["logLevel"] = "info" # info || debug 
+	localdb["logLevel"] = "info" # info || debug
 	localdb["threadNumber"] = 16 * psutil.cpu_count()
 	localdb["mysql"] = dict()
 	localdb["mysql"]["host"] = "localhost"
 	localdb["mysql"]["user"] = "editor"
 	localdb["mysql"]["passwd"] = "passwd44c4"
 	localdb["mysql"]["dbName"] = "schistory"
-	localdb["mysql"]["limit"] = 100
-	localdb["mysql"]["offset"] = 0
+	localdb["mysql"]["limit"] = 300
 	localdb["mysql"]["usingThread"] = list()
 	localdb["scURL"] = "http://gmt.star-conflict.com/pubapi/v1/userinfo.php?nickname="
+	localdb["memoryUsinglimit"] = 450
+	### fix me! ###
 #end define
 
 def General():
@@ -85,35 +93,41 @@ def General():
 	AddLog("Start General function.", "debug")
 	RecordStartTime()
 
+	# Remember the number of users
+	localbuffer["usersLen"] = GetCountOfUsers()
+
 	# Hand out work
-	threadCount_old = threading.active_count()
+	localbuffer["selfTestingResult"]["threadCountOld"] = threading.active_count()
 	for i in range(localdb["threadNumber"]):
 		threading.Thread(target=TryScanInformation).start()
 
 	# Wait for the end of work
 	while True:
-		time.sleep(10)
-		threadCount_new = threading.active_count()
-		AddLog("threads: {0} -> {1}".format(threadCount_new, threadCount_old), "info")
-		if (threadCount_old == threadCount_new):
+		time.sleep(60)
+		PrintSelfTestingResult()
+		if localbuffer["selfTestingResult"]["threadCountOld"] == localbuffer["selfTestingResult"]["threadCount"]:
 			break
 	#end while
-	
-	# Return const
-	localdb["mysql"]["offset"] = 0
 
 	# Write clans to DB
 	SaveClansToDB()
 
 	# Check DB
 	CheckDB()
-	
+
 	RecordEndTime()
+#end define
+
+def GetCountOfUsers():
+	engine, session = CreateConnectToDB()
+	result = session.query(User).count()
+	CloseDBConnect(engine, session)
+	return result
 #end define
 
 def RecordStartTime():
 	localbuffer["start"] = int(time.time())
-	localbuffer["count"] = 0
+	localbuffer["usersSavedLen"] = 0
 
 	# Create MySQL connect
 	engine, session = CreateConnectToDB()
@@ -127,7 +141,7 @@ def RecordStartTime():
 	#end if
 
 	# Update datetime
-	updateTime.datetime=DateTimeLibrary.datetime.utcnow()
+	updateTime.datetime = DateTimeLibrary.datetime.utcnow()
 
 	# Close DB connect
 	CloseDBConnect(engine, session)
@@ -137,8 +151,8 @@ def RecordEndTime():
 	global localdb
 	end = int(time.time())
 	total = end - localbuffer["start"]
-	ups = int(localbuffer["count"]/total)
-	AddLog("Total time: {0}sec. Total users: {1}".format(total, localbuffer["count"]))
+	ups = int(localbuffer["usersSavedLen"]/total)
+	AddLog("Total time: {0}sec. Total users: {1}".format(total, localbuffer["usersSavedLen"]))
 	AddLog("{0}ups (user per second). Total threads: {1}".format(ups, localdb["threadNumber"]))
 
 	# Create MySQL connect
@@ -153,7 +167,7 @@ def RecordEndTime():
 	#end if
 
 	# Update datetime
-	updateTime.datetime=DateTimeLibrary.datetime.utcnow()
+	updateTime.datetime = DateTimeLibrary.datetime.utcnow()
 
 	# Close DB connection
 	CloseDBConnect(engine, session)
@@ -171,39 +185,44 @@ def ScanInformation():
 	global localdb
 	AddLog("Start ScanInformation function.", "debug")
 
-	# Create MySQL connect
-	engine, session = CreateConnectToDB()
-
 	while True:
+		# Create MySQL connect
+		engine, session = CreateConnectToDB()
+
 		# Get data from DB
 		TakeDBConnect()
 		limit = localdb["mysql"]["limit"]
-		offset = localdb["mysql"]["offset"]
+		offset = localbuffer["mysqlOffset"]
+		start = time.time()
 		partOfUsersList = session.query(User).limit(limit).offset(offset).all()
-		localdb["mysql"]["offset"] += limit
+		localbuffer["mysqlOffset"] += limit
+		end = time.time()
+		over = round(end-start, 2)
+		if over > 1:
+			AddLog("ScanInformation(session.query) take {0} sec".format(over), "warning")
 		GiveDBConnect()
 
 		# Scan users
 		for user in partOfUsersList:
-			ScanUser(user=user, session=session)
+			TryScanUser(user=user, session=session)
 		#end for
 
+		# Close DB connection
+		CloseDBConnect(engine, session)
+
 		# Break if users end
-		if (len(partOfUsersList) == 0):
+		if len(partOfUsersList) == 0:
 			break
 	#end while
-	
-	# Close DB connection
-	CloseDBConnect(engine, session)
 #end define
 
-def TrtScanUser():
+def TryScanUser(**args):
 	try:
 		user = args.get("user")
 		session = args.get("session")
 		ScanUser(user=user, session=session)
 	except Exception as err:
-		AddLog("TrtScanUser: {0}".format(err), "error")
+		AddLog("TryScanUser: {0}".format(err), "error")
 #end define
 
 def ScanUser(**args):
@@ -213,14 +232,14 @@ def ScanUser(**args):
 	nickname = user.GetNickname()
 	AddLog("Start ScanUser function. nickname: {0}. uid: {1}".format(nickname, uid), "debug")
 
-	localbuffer["count"] += 1
+	localbuffer["usersSavedLen"] += 1
 	webform_json = GetDataFromSC(nickname)
 
 	# If all is bad
 	if webform_json == None:
 		AddLog("I'm crying because I can't get a candy ;(", "error")
 
-	elif (len(nickname) > 20):
+	elif len(nickname) > 20:
 		AddLog("Bad nickname: {0}".format(nickname), "warning")
 
 	# If invalid nickname
@@ -298,7 +317,7 @@ def PrepareDataForWriteInDB(**args):
 	otherModel = None
 
 	# Create nickname model
-	if (newNickname != nickname):
+	if newNickname != nickname:
 		nickname = newNickname
 		nicknameModel = Nickname(nickname=nickname)
 	else:
@@ -309,7 +328,7 @@ def PrepareDataForWriteInDB(**args):
 	if pvp:
 		pvpModel = userModel.GetPvpModel()
 		if not pvpModel or pvpModel.gamePlayed != pvpGamePlayed:
-			pvpModel = PVP(gamePlayed=pvpGamePlayed, gameWin=pvpGameWin, totalAssists=pvpTotalAssists, totalBattleTime=pvpTotalBattleTime, totalDeath=pvpTotalDeath, totalDmgDone=pvpTotalDmgDone, 
+			pvpModel = PVP(gamePlayed=pvpGamePlayed, gameWin=pvpGameWin, totalAssists=pvpTotalAssists, totalBattleTime=pvpTotalBattleTime, totalDeath=pvpTotalDeath, totalDmgDone=pvpTotalDmgDone,
 				totalHealingDone=pvpTotalHealingDone, totalKill=pvpTotalKill, totalVpDmgDone=pvpTotalVpDmgDone)
 		#end if
 	#end if
@@ -347,7 +366,7 @@ def PrepareDataForWriteInDB(**args):
 	#end if
 
 	# Create User History model
-	userHistoryModel = UserHistory(userModel=userModel, nicknameModel=nicknameModel, pvpModel=pvpModel, pveModel=pveModel, coopModel=coopModel, openworldModel=openWorldModel, 
+	userHistoryModel = UserHistory(userModel=userModel, nicknameModel=nicknameModel, pvpModel=pvpModel, pveModel=pveModel, coopModel=coopModel, openworldModel=openWorldModel,
 		otherModel=otherModel, cid=cid)
 	session.add(userHistoryModel)
 
@@ -454,22 +473,22 @@ def CheckDB():
 		AddLog("Table clannames - {0}OK{1}".format(bcolors.OKGREEN, bcolors.ENDC))
 	#end if
 
-	conn.close
+	conn.close()
 	CloseDBConnect(engine, session)
 #end define
 
 def SelectHaving(var):
-	return select([var, func.count(var)]).group_by(var).having(func.count(var)>1)
+	return select([var,func.count(var)]).group_by(var).having(func.count(var)>1)
 #end define
 
-def GetDataFromJson(inputData, serchText, outputDataTypeString = "default"):
+def GetDataFromJson(inputData, serchText, outputDataTypeString="default"):
 	outputData = None
-	if (inputData != None and serchText in inputData):
-		if (outputDataTypeString == "default"):
+	if inputData != None and serchText in inputData:
+		if outputDataTypeString == "default":
 			outputData = inputData[serchText]
-		elif (outputDataTypeString == "int"):
+		elif outputDataTypeString == "int":
 			outputData = int(inputData[serchText])
-		elif (outputDataTypeString == "float"):
+		elif outputDataTypeString == "float":
 			outputData = float(inputData[serchText])
 	return outputData
 #end define
@@ -494,7 +513,7 @@ def CloseDBConnect(engine, session):
 def TakeDBConnect():
 	global localdb
 	while True:
-		if (len(localdb["mysql"]["usingThread"]) > 0):
+		if len(localdb["mysql"]["usingThread"]) > 0:
 			time.sleep(0.1)
 		else:
 			localdb["mysql"]["usingThread"].append(GetThreadName())
@@ -504,7 +523,7 @@ def TakeDBConnect():
 def GiveDBConnect():
 	global localdb
 	threadName = GetThreadName()
-	if (threadName in localdb["mysql"]["usingThread"]):
+	if threadName in localdb["mysql"]["usingThread"]:
 		localdb["mysql"]["usingThread"].remove(threadName)
 #end define
 
@@ -524,9 +543,42 @@ def GetDataFromSC(nickname):
 	#end for
 	end = time.time()
 	over = round(end-start, 2)
-	if (over > 1):
+	if over > 1:
 		AddLog("GetDataFromSC({0}) take {1} sec".format(nickname, over), "warning")
 	return outputData
+#end define
+
+def SelfTesting():
+	while True:
+		try:
+			time.sleep(1)
+			SelfTest()
+		except Exception as err:
+			AddLog("SelfTesting: {0}".format(err), "error")
+#end define
+
+def SelfTest():
+	process = psutil.Process(os.getpid())
+	memoryUsing = int(process.memory_info().rss/1024/1024)
+	threadCount = threading.active_count()
+	localbuffer["selfTestingResult"]["memoryUsing"] = memoryUsing
+	localbuffer["selfTestingResult"]["threadCount"] = threadCount
+	if memoryUsing > localdb["memoryUsinglimit"]:
+		localdb["memoryUsinglimit"] += 50
+		AddLog("Memory using: {0}Mb".format(memoryUsing), "warning")
+#end define
+
+def PrintSelfTestingResult():
+	threadCount_old = localbuffer["selfTestingResult"]["threadCountOld"]
+	threadCount_new = localbuffer["selfTestingResult"]["threadCount"]
+	memoryUsing = localbuffer["selfTestingResult"]["memoryUsing"]
+	usersSavedLen = localbuffer["usersSavedLen"]
+	usersLen = localbuffer["usersLen"]
+	usersSavedPercent = round(usersSavedLen/usersLen, 3)
+	AddLog("{0}Self testing informatinon:{1}".format(bcolors.INFO, bcolors.ENDC))
+	AddLog("Threads: {0} -> {1}".format(threadCount_new, threadCount_old))
+	AddLog("Memory using: {0}Mb".format(memoryUsing))
+	AddLog("Users: {0} -> {1} ({2}%)".format(usersSavedLen, usersLen, usersSavedPercent))
 #end define
 
 def GetThreadName():
@@ -563,26 +615,24 @@ def AddLog(inputText, mode="info"):
 	timeText = "{0} (UTC)".format(timeText).ljust(32, ' ')
 
 	# Pass if set log level
-	if (localdb["logLevel"] == "none"):
-		return
-	elif (localdb["logLevel"] != "debug" and mode == "debug"):
+	if localdb["logLevel"] != "debug" and mode == "debug":
 		return
 
 	# Set color mode
-	if (mode == "info"):
+	if mode == "info":
 		colorStart = bcolors.INFO + bcolors.BOLD
-	elif (mode == "warning"):
+	elif mode == "warning":
 		colorStart = bcolors.WARNING + bcolors.BOLD
-	elif (mode == "error"):
+	elif mode == "error":
 		colorStart = bcolors.ERROR + bcolors.BOLD
-	elif (mode == "debug"):
+	elif mode == "debug":
 		colorStart = bcolors.DEBUG + bcolors.BOLD
 	else:
 		colorStart = bcolors.UNDERLINE + bcolors.BOLD
 	modeText = "{0}{1}{2}".format(colorStart, "[{0}]".format(mode).ljust(10, ' '), bcolors.ENDC)
-	
+
 	# Set color thread
-	if (mode == "error"):
+	if mode == "error":
 		colorStart = bcolors.ERROR + bcolors.BOLD
 	else:
 		colorStart = bcolors.OKGREEN + bcolors.BOLD
@@ -620,10 +670,10 @@ def WriteLogFile():
 	file.close()
 
 	# Control log size
-	if (localdb["isLimitLogFile"] == False):
+	if localdb["isLimitLogFile"] == False:
 		return
 	allline = count_lines(logName)
-	if (allline > 4096 + 256):
+	if allline > 4096 + 256:
 		delline = allline - 4096
 		f=open(logName).readlines()
 		i = 0
@@ -643,6 +693,7 @@ def count_lines(filename, chunk_size=1<<13):
 #end define
 
 class bcolors:
+	'''This class is designed to display text in color format'''
 	DEBUG = '\033[95m'
 	INFO = '\033[94m'
 	OKGREEN = '\033[92m'
@@ -661,4 +712,5 @@ class bcolors:
 if __name__ == "__main__":
 	Init()
 	General()
+	time.sleep(1.1)
 #end if
