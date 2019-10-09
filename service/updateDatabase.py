@@ -75,6 +75,7 @@ def FirstStartUp():
 	localdb["isLimitLogFile"] = False
 	localdb["isDeleteOldLogFile"] = True
 	localdb["logLevel"] = "info" # info || debug
+	localdb["isIgnorLogWirning"] = True
 	localdb["threadNumber"] = 16 * psutil.cpu_count()
 	localdb["mysql"] = dict()
 	localdb["mysql"]["host"] = "localhost"
@@ -505,9 +506,14 @@ def CreateConnectToDB():
 #end define
 
 def CloseDBConnect(engine, session):
+	start = time.time()
 	session.commit()
 	session.close()
 	engine.dispose()
+	end = time.time()
+	over = round(end-start, 2)
+	if over > 1:
+		AddLog("CloseDBConnect take {1} sec".format(over), "warning")
 #end define
 
 def TakeDBConnect():
@@ -574,11 +580,16 @@ def PrintSelfTestingResult():
 	memoryUsing = localbuffer["selfTestingResult"]["memoryUsing"]
 	usersSavedLen = localbuffer["usersSavedLen"]
 	usersLen = localbuffer["usersLen"]
-	usersSavedPercent = round(usersSavedLen/usersLen, 3)
+	usersSavedPercent = round(usersSavedLen/usersLen*100, 1)
+	timestamp = int(time.time())
+	timePassed = timestamp - localbuffer["start"]
+	timeLeft = int((usersLen - usersSavedLen)/(usersSavedLen/timePassed))
+	finishedTime = time.strftime("%d.%m.%Y, %H:%M:%S", time.gmtime(timestamp+timeLeft))
 	AddLog("{0}Self testing informatinon:{1}".format(bcolors.INFO, bcolors.ENDC))
 	AddLog("Threads: {0} -> {1}".format(threadCount_new, threadCount_old))
 	AddLog("Memory using: {0}Mb".format(memoryUsing))
 	AddLog("Users: {0} -> {1} ({2}%)".format(usersSavedLen, usersLen, usersSavedPercent))
+	AddLog("Time passed: {0}sec. Time left: {1}sec. Will be finished: {2} (UTC)".format(timePassed, timeLeft, finishedTime))
 #end define
 
 def GetThreadName():
@@ -616,6 +627,8 @@ def AddLog(inputText, mode="info"):
 
 	# Pass if set log level
 	if localdb["logLevel"] != "debug" and mode == "debug":
+		return
+	elif localdb["isIgnorLogWirning"] == True and mode == "warning":
 		return
 
 	# Set color mode
