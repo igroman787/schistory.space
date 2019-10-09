@@ -75,7 +75,7 @@ def FirstStartUp():
 	localdb["isLimitLogFile"] = False
 	localdb["isDeleteOldLogFile"] = True
 	localdb["logLevel"] = "info" # info || debug
-	localdb["isIgnorLogWirning"] = True
+	localdb["isIgnorLogWarning"] = True
 	localdb["threadNumber"] = 16 * psutil.cpu_count()
 	localdb["mysql"] = dict()
 	localdb["mysql"]["host"] = "localhost"
@@ -589,7 +589,7 @@ def PrintSelfTestingResult():
 	AddLog("Threads: {0} -> {1}".format(threadCount_new, threadCount_old))
 	AddLog("Memory using: {0}Mb".format(memoryUsing))
 	AddLog("Users: {0} -> {1} ({2}%)".format(usersSavedLen, usersLen, usersSavedPercent))
-	AddLog("Time passed: {0}sec. Time left: {1}sec. Will be finished: {2} (UTC)".format(timePassed, timeLeft, finishedTime))
+	AddLog("Time passed: {0} sec. Time left: {1} sec. Will be finished: {2} (UTC)".format(timePassed, timeLeft, finishedTime))
 #end define
 
 def GetThreadName():
@@ -628,7 +628,7 @@ def AddLog(inputText, mode="info"):
 	# Pass if set log level
 	if localdb["logLevel"] != "debug" and mode == "debug":
 		return
-	elif localdb["isIgnorLogWirning"] == True and mode == "warning":
+	elif localdb["isIgnorLogWarning"] == True and mode == "warning":
 		return
 
 	# Set color mode
