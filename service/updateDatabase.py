@@ -75,7 +75,7 @@ def FirstStartUp():
 	localdb["isLimitLogFile"] = False
 	localdb["isDeleteOldLogFile"] = True
 	localdb["logLevel"] = "info" # info || debug
-	localdb["isIgnorLogWarning"] = True
+	localdb["isIgnorLogWarning"] = False
 	localdb["threadNumber"] = 16 * psutil.cpu_count()
 	localdb["mysql"] = dict()
 	localdb["mysql"]["host"] = "localhost"
@@ -513,7 +513,7 @@ def CloseDBConnect(engine, session):
 	end = time.time()
 	over = round(end-start, 2)
 	if over > 1:
-		AddLog("CloseDBConnect take {1} sec".format(over), "warning")
+		AddLog("CloseDBConnect take {0} sec".format(over), "warning")
 #end define
 
 def TakeDBConnect():
