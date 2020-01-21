@@ -22,6 +22,7 @@ import os
 import sys
 import time
 import json
+import fcntl
 import psutil
 import threading
 from urllib.request import urlopen
@@ -42,11 +43,15 @@ def Init():
 	localbuffer["selfTestingResult"] = dict()
 	localbuffer["mysqlOffset"] = 0
 
-
 	# Get program, log and database file name
 	myName = GetMyName()
+	myPath = GetMyPath()
 	localbuffer["logFileName"] = myName + ".log"
 	localbuffer["localdbFileName"] = myName + ".db"
+	localbuffer["lockFileName"] = myPath + '.' + myName + ".lock"
+
+	# Start only one process (exit if process exist)
+	StartOnlyOneProcess()
 
 	# Start other threads
 	threading.Thread(target=Logging, name="Logging", daemon=True).start()
@@ -67,6 +72,43 @@ def Init():
 	engine, session = CreateConnectToDB()
 	Base.metadata.create_all(engine)
 	CloseDBConnect(engine, session)
+#end define
+
+def StartOnlyOneProcess():
+	myName = GetMyName()
+	myPath = GetMyPath()
+	lockFileName = localbuffer["lockFileName"]
+	if os.path.isfile(lockFileName):
+		file = open(lockFileName, 'r')
+		pid_str = file.read()
+		file.close()
+		try:
+			pid = int(pid_str)
+			process = psutil.Process(pid)
+			fullProcessName = " ".join(process.cmdline())
+		except:
+			fullProcessName = ""
+		if (fullProcessName.find(GetMyFullName()) > -1):
+			print("The process is already running")
+			sys.exit(0)
+		else:
+			WritePidToLockFile()
+	else:
+		WritePidToLockFile()
+#end define
+
+def WritePidToLockFile():
+	pid = os.getpid()
+	pid_str = str(pid)
+	lockFileName = localbuffer["lockFileName"]
+	file = open(lockFileName, 'w')
+	file.write(pid_str)
+	file.close()
+#end define
+
+def DeleteLockFile():
+	lockFileName = localbuffer["lockFileName"]
+	os.remove(lockFileName)
 #end define
 
 def FirstStartUp():
@@ -705,6 +747,11 @@ def count_lines(filename, chunk_size=1<<13):
 			for chunk in iter(lambda: file.read(chunk_size), ''))
 #end define
 
+def CorrectExit():
+	time.sleep(1.1)
+	DeleteLockFile()
+#end define
+
 class bcolors:
 	'''This class is designed to display text in color format'''
 	DEBUG = '\033[95m'
@@ -725,5 +772,5 @@ class bcolors:
 if __name__ == "__main__":
 	Init()
 	General()
-	time.sleep(1.1)
+	CorrectExit()
 #end if
