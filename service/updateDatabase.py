@@ -16,13 +16,15 @@ Before starting this script run the following steps:
 	wget https://raw.githubusercontent.com/igroman787/schistory.space/master/schistory.sql.zip
 	unzip schistory.sql.zip
 	mysql schistory < schistory.sql
+4. Crontab:
+	0 0 * * * /usr/bin/python3 /home/user/updateDatabase.py
+	0 12 * * 0 /usr/bin/python3 /home/user/updateDatabase.py -e scanOldUsers
 '''
 
 import os
 import sys
 import time
 import json
-import fcntl
 import psutil
 import threading
 from urllib.request import urlopen
@@ -41,17 +43,15 @@ def Init():
 	localbuffer["cidList"] = list()
 	localbuffer["clanList"] = list()
 	localbuffer["selfTestingResult"] = dict()
+	localbuffer["usersSavedLen"] = 0
 	localbuffer["mysqlOffset"] = 0
+	localbuffer["pnumTrigger"] = 30
+
 
 	# Get program, log and database file name
 	myName = GetMyName()
-	myPath = GetMyPath()
 	localbuffer["logFileName"] = myName + ".log"
 	localbuffer["localdbFileName"] = myName + ".db"
-	localbuffer["lockFileName"] = myPath + '.' + myName + ".lock"
-
-	# Start only one process (exit if process exist)
-	StartOnlyOneProcess()
 
 	# Start other threads
 	threading.Thread(target=Logging, name="Logging", daemon=True).start()
@@ -72,43 +72,19 @@ def Init():
 	engine, session = CreateConnectToDB()
 	Base.metadata.create_all(engine)
 	CloseDBConnect(engine, session)
+
+	# Event reaction
+	if ("-e" in sys.argv):
+		x = sys.argv.index("-e")
+		eventName = sys.argv[x+1]
+		Event(eventName)
+	#end if
 #end define
 
-def StartOnlyOneProcess():
-	myName = GetMyName()
-	myPath = GetMyPath()
-	lockFileName = localbuffer["lockFileName"]
-	if os.path.isfile(lockFileName):
-		file = open(lockFileName, 'r')
-		pid_str = file.read()
-		file.close()
-		try:
-			pid = int(pid_str)
-			process = psutil.Process(pid)
-			fullProcessName = " ".join(process.cmdline())
-		except:
-			fullProcessName = ""
-		if (fullProcessName.find(GetMyFullName()) > -1):
-			print("The process is already running")
-			sys.exit(0)
-		else:
-			WritePidToLockFile()
-	else:
-		WritePidToLockFile()
-#end define
-
-def WritePidToLockFile():
-	pid = os.getpid()
-	pid_str = str(pid)
-	lockFileName = localbuffer["lockFileName"]
-	file = open(lockFileName, 'w')
-	file.write(pid_str)
-	file.close()
-#end define
-
-def DeleteLockFile():
-	lockFileName = localbuffer["lockFileName"]
-	os.remove(lockFileName)
+def Event(eventName):
+	if eventName == "scanOldUsers":
+		ScanOldUsersEvent()
+	sys.exit()
 #end define
 
 def FirstStartUp():
@@ -129,6 +105,22 @@ def FirstStartUp():
 	localdb["scURL"] = "http://gmt.star-conflict.com/pubapi/v1/userinfo.php?nickname="
 	localdb["memoryUsinglimit"] = 450
 	### fix me! ###
+#end define
+
+def ScanOldUsersEvent():
+	# Create MySQL connect
+	engine, session = CreateConnectToDB()
+
+	partOfUsersList = session.query(User).filter(User.pnum>=localbuffer["pnumTrigger"]).all()
+	print(len(partOfUsersList))
+
+	# Scan users
+	for user in partOfUsersList:
+		user.pnum -= 1
+		TryScanUser(user=user, session=session)
+	#end for
+
+	CloseDBConnect(engine, session)
 #end define
 
 def General():
@@ -152,12 +144,9 @@ def General():
 			break
 	#end while
 
-	# Write clans to DB
+	# Write clans to DB, check DB, write end time
 	SaveClansToDB()
-
-	# Check DB
 	CheckDB()
-
 	RecordEndTime()
 #end define
 
@@ -170,7 +159,7 @@ def GetCountOfUsers():
 
 def RecordStartTime():
 	localbuffer["start"] = int(time.time())
-	localbuffer["usersSavedLen"] = 0
+	
 
 	# Create MySQL connect
 	engine, session = CreateConnectToDB()
@@ -237,7 +226,7 @@ def ScanInformation():
 		limit = localdb["mysql"]["limit"]
 		offset = localbuffer["mysqlOffset"]
 		start = time.time()
-		partOfUsersList = session.query(User).limit(limit).offset(offset).all()
+		partOfUsersList = session.query(User).filter(User.pnum<localbuffer["pnumTrigger"]).limit(limit).offset(offset).all()
 		localbuffer["mysqlOffset"] += limit
 		end = time.time()
 		over = round(end-start, 2)
@@ -288,7 +277,7 @@ def ScanUser(**args):
 	# If invalid nickname
 	elif webform_json["code"] == 1:
 		AddLog("Invalid nickname: {0}".format(nickname), "debug")
-		RememberLostUid(uid)
+		RememberLostUid(session, uid)
 
 	# If everything is ok
 	elif webform_json["code"] == 0:
@@ -307,7 +296,7 @@ def PrepareDataForWriteInDB(**args):
 	# Check if uid is correct
 	if uid != data.get("uid"):
 		AddLog("PrepareDataForWriteInDB: uid from DB {0} doesn't coincide with uid from SC {1}".format(uid, data.get("uid")), "warning")
-		RememberLostUid(uid)
+		RememberLostUid(session, uid)
 		return
 	#end if
 
@@ -353,11 +342,11 @@ def PrepareDataForWriteInDB(**args):
 
 	# Create user model
 	userModel = session.query(User).filter_by(uid=uid).first()
-	pvpModel = None
-	pveModel = None
-	coopModel = None
-	openWorldModel = None
-	otherModel = None
+	pvpModel = userModel.GetPvpModel()
+	pveModel = userModel.GetPveModel()
+	coopModel = userModel.GetCoopModel()
+	openWorldModel = userModel.GetOpenWorldModel()
+	otherModel = userModel.GetOtherModel()
 
 	# Create nickname model
 	if newNickname != nickname:
@@ -369,7 +358,6 @@ def PrepareDataForWriteInDB(**args):
 
 	# Create PVP model
 	if pvp:
-		pvpModel = userModel.GetPvpModel()
 		if not pvpModel or pvpModel.gamePlayed != pvpGamePlayed:
 			pvpModel = PVP(gamePlayed=pvpGamePlayed, gameWin=pvpGameWin, totalAssists=pvpTotalAssists, totalBattleTime=pvpTotalBattleTime, totalDeath=pvpTotalDeath, totalDmgDone=pvpTotalDmgDone,
 				totalHealingDone=pvpTotalHealingDone, totalKill=pvpTotalKill, totalVpDmgDone=pvpTotalVpDmgDone)
@@ -378,7 +366,6 @@ def PrepareDataForWriteInDB(**args):
 
 	# Create PVE model
 	if pve:
-		pveModel = userModel.GetPveModel()
 		if not pveModel or pveModel.gamePlayed != pveGamePlayed:
 			pveModel = PVE(gamePlayed=pveGamePlayed)
 		#end if
@@ -386,7 +373,6 @@ def PrepareDataForWriteInDB(**args):
 
 	# Create COOP model
 	if coop:
-		coopModel = userModel.GetCoopModel()
 		if not coopModel or coopModel.gamePlayed != coopGamePlayed:
 			coopModel = COOP(gamePlayed=coopGamePlayed, gameWin=coopGameWin, totalBattleTime=coopTotalBattleTime)
 		#end if
@@ -394,7 +380,6 @@ def PrepareDataForWriteInDB(**args):
 
 	# Create OpenWorld model
 	if openWorld:
-		openWorldModel = userModel.GetOpenWorldModel()
 		if not openWorldModel or openWorldModel.karma != openWorldKarma:
 			openWorldModel = OpenWorld(karma=openWorldKarma)
 		#end if
@@ -402,10 +387,23 @@ def PrepareDataForWriteInDB(**args):
 
 	# Create Other model
 	if effRating or prestigeBonus or accountRank:
-		otherModel = userModel.GetOtherModel()
 		if not otherModel or otherModel.effRating != effRating or otherModel.prestigeBonus != prestigeBonus or otherModel.accountRank != accountRank:
 			otherModel = Other(effRating=effRating, prestigeBonus=prestigeBonus, accountRank=accountRank)
 		#end if
+	#end if
+
+	# Chech if data old
+	if (cid == userModel.GetClanId() and 
+		nicknameModel == userModel.GetNicknameModel() and 
+		pvpModel == userModel.GetPvpModel() and 
+		pveModel == userModel.GetPveModel() and 
+		coopModel == userModel.GetCoopModel() and 
+		openWorldModel == userModel.GetOpenWorldModel() and 
+		otherModel == userModel.GetOtherModel()):
+		userModel.pnum += 1
+		return
+	else:
+		userModel.pnum = 0
 	#end if
 
 	# Create User History model
@@ -420,11 +418,8 @@ def PrepareDataForWriteInDB(**args):
 	AddLog("Start WriteInDB function. nickname: {0}. uid: {1}".format(nickname, uid), "debug")
 #end define
 
-def RememberLostUid(uid):
+def RememberLostUid(session, uid):
 	AddLog("Start RememberLostUid function. uid: {0}".format(uid), "debug")
-
-	# Create MySQL connect
-	engine, session = CreateConnectToDB()
 
 	# Get module from DB
 	lostUid = session.query(LostUid).filter_by(uid=uid).first()
@@ -432,9 +427,6 @@ def RememberLostUid(uid):
 		lostUid = LostUid(uid=uid)
 		session.add(lostUid)
 	#end if
-
-	# Close DB connection
-	CloseDBConnect(engine, session)
 #end define
 
 def AddClan(**args):
@@ -747,11 +739,6 @@ def count_lines(filename, chunk_size=1<<13):
 			for chunk in iter(lambda: file.read(chunk_size), ''))
 #end define
 
-def CorrectExit():
-	time.sleep(1.1)
-	DeleteLockFile()
-#end define
-
 class bcolors:
 	'''This class is designed to display text in color format'''
 	DEBUG = '\033[95m'
@@ -772,5 +759,5 @@ class bcolors:
 if __name__ == "__main__":
 	Init()
 	General()
-	CorrectExit()
+	time.sleep(1.1)
 #end if
