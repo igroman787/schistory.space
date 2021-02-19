@@ -43,7 +43,6 @@ def Init():
 	localbuffer["cidList"] = list()
 	localbuffer["clanList"] = list()
 	localbuffer["selfTestingResult"] = dict()
-	localbuffer["usersSavedLen"] = 0
 	localbuffer["mysqlOffset"] = 0
 	localbuffer["pnumTrigger"] = 30
 
@@ -159,7 +158,7 @@ def GetCountOfUsers():
 
 def RecordStartTime():
 	localbuffer["start"] = int(time.time())
-	
+	localbuffer["usersSavedLen"] = 0
 
 	# Create MySQL connect
 	engine, session = CreateConnectToDB()

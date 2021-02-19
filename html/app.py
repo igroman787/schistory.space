@@ -25,17 +25,8 @@ Before starting this script run the following steps:
         ErrorLog ${APACHE_LOG_DIR}/error.log
         CustomLog ${APACHE_LOG_DIR}/access.log combined
 </VirtualHost>
-5. Write into '/var/www/flask/config.json':
-{
-	"id": "<id-from-openexchangerates>",
-	"url": "https://openexchangerates.org/api/latest.json?",
-	"user": "<mysql-user-name>",
-	"passwd": "<mysql-password>",
-	"db": "api",
-	"currencies": ["CZK", "EUR", "PLN", "USD"]
-}
-6. a2enmod wsgi
-7. Restart apache2
+5. a2enmod wsgi
+6. Restart apache2
 '''
 
 
@@ -54,7 +45,7 @@ app = Flask(__name__)
 # cnfpath = os.path.join(app.root_path, "config.json")
 # cnf = Config(cnfpath)
 # db = DataBase(cnf.user, cnf.passwd, cnf.db, cnf.host)
-db = DataBase("reader", "passwd44", "schistory", "10.9.0.2")
+db = DataBase("editor", "passwd44c4", "schistory", "127.0.0.1")
 resp = Response()
 
 
@@ -67,29 +58,6 @@ def Init():
 	app.config["JSON_SORT_KEYS"] = False
 	app.config["JSONIFY_PRETTYPRINT_REGULAR"] = True
 #end define
-
-# def SaveData():
-# 	url = cnf.url + urlencode({"app_id": cnf.id, "base": "USD"})
-# 	jdata = GetJsonFromUrl(url)
-# 	rates = jdata.get("rates")
-# 	db.CreateConnect()
-# 	for name, rate in rates.items():
-# 		db.AddRate(name, rate)
-# 	db.CloseConnect()
-# #end define
-
-# def GetJsonFromUrl(url):
-# 	text = GetUrl(url)
-# 	jdata = json.loads(text)
-# 	return jdata
-# #end define
-
-# def GetUrl(url):
-# 	webform = urlopen(url)
-# 	data = webform.read()
-# 	text = data.decode()
-# 	return text
-# #end define
 
 
 ###
@@ -226,9 +194,9 @@ def Err502(error):
 ###
 ### Старт программы
 ###
-#if __name__ == "__main__":
-Init()
-app.run(host="0.0.0.0", port=8007)
+if __name__ == "__main__":
+	Init()
+	app.run(host="0.0.0.0", port=8080)
 #end if
 
 
