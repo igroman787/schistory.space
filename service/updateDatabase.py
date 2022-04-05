@@ -71,19 +71,6 @@ def Init():
 	engine, session = CreateConnectToDB()
 	Base.metadata.create_all(engine)
 	CloseDBConnect(engine, session)
-
-	# Event reaction
-	if ("-e" in sys.argv):
-		x = sys.argv.index("-e")
-		eventName = sys.argv[x+1]
-		Event(eventName)
-	#end if
-#end define
-
-def Event(eventName):
-	if eventName == "scanOldUsers":
-		ScanOldUsersEvent()
-	sys.exit()
 #end define
 
 def FirstStartUp():
@@ -104,22 +91,6 @@ def FirstStartUp():
 	localdb["scURL"] = "http://gmt.star-conflict.com/pubapi/v1/userinfo.php?nickname="
 	localdb["memoryUsinglimit"] = 450
 	### fix me! ###
-#end define
-
-def ScanOldUsersEvent():
-	# Create MySQL connect
-	engine, session = CreateConnectToDB()
-
-	partOfUsersList = session.query(User).filter(User.pnum>=localbuffer["pnumTrigger"]).all()
-	print(len(partOfUsersList))
-
-	# Scan users
-	for user in partOfUsersList:
-		user.pnum -= 1
-		TryScanUser(user=user, session=session)
-	#end for
-
-	CloseDBConnect(engine, session)
 #end define
 
 def General():
@@ -225,7 +196,13 @@ def ScanInformation():
 		limit = localdb["mysql"]["limit"]
 		offset = localbuffer["mysqlOffset"]
 		start = time.time()
-		partOfUsersList = session.query(User).filter(User.pnum<localbuffer["pnumTrigger"]).limit(limit).offset(offset).all()
+		
+		if "scanOldUsers" in sys.argv:
+			partOfUsersList = session.query(User).filter(User.pnum>=localbuffer["pnumTrigger"]).limit(limit).offset(offset).all()
+		else:
+			partOfUsersList = session.query(User).filter(User.pnum<localbuffer["pnumTrigger"]).limit(limit).offset(offset).all()
+		#end if
+		
 		localbuffer["mysqlOffset"] += limit
 		end = time.time()
 		over = round(end-start, 2)
